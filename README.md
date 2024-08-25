@@ -1,6 +1,6 @@
 # Hotsock JavaScript Client
 
-This JS client allows you to connect and handle Hotsock messages on a WebSocket connection. It's designed for use in the browser, provides a small and stable API, and handles reconnects gracefully. React Native is also supported.
+This JS client allows you to connect and handle Hotsock messages on a WebSocket connection. It's designed for use in the browser, provides a small and stable API with no dependencies, and handles reconnects gracefully. React Native is also supported.
 
 ## Installation
 
