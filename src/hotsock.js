@@ -1133,7 +1133,7 @@ class Channel {
    * @param {HotsockClient} client The parent Hotsock client
    * @param {string} name The name of the channel
    */
-  constructor(client, channel) {
+  constructor(client, name) {
     this.#client = client
     this.#name = name
   }
