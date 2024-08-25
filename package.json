@@ -1,0 +1,33 @@
+{
+  "name": "@hotsock/hotsock-js",
+  "version": "1.0.0",
+  "description": "JavaScript library for Hotsock WebSocket connections, subscriptions, and messages",
+  "main": "src/hotsock.js",
+  "author": "James Miller",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/hotsock/hotsock-js/issues"
+  },
+  "homepage": "https://github.com/hotsock/hotsock-js",
+  "keywords": [
+    "websockets",
+    "real-time",
+    "realtime",
+    "channels",
+    "subscriptions"
+  ],
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.4",
+    "@rollup/plugin-terser": "^0.4.4",
+    "jest": "^29.7.0",
+    "rollup": "^4.21.0"
+  },
+  "prettier": {
+    "semi": false
+  },
+  "scripts": {
+    "build": "rollup -c",
+    "test": "jest --coverage --detectOpenHandles"
+  }
+}
