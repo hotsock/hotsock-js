@@ -1,3 +1,11 @@
+// Load Buffer for Base64 decoding
+let BufferInstance = null
+if (typeof global !== "undefined" && global.Buffer) {
+  BufferInstance = global.Buffer
+} else if (typeof window === "undefined") {
+  BufferInstance = require("buffer").Buffer
+}
+
 /**
  * HotsockClient is the main class that should be used by clients to initialize
  * connections and event handlers to a Hotsock installation.
@@ -46,6 +54,18 @@ export class HotsockClient {
   #connectTokenFnMaxAttempts
 
   /**
+   * A function that is called after retries on the `connectTokenFn` have been
+   * reached and no further attempts to load it will be made. If not supplied,
+   * the error is thrown.
+   */
+  get connectTokenErrorFn() {
+    return this.#connectTokenErrorFn
+  }
+
+  /** @private @type {LoadTokenErrorFn} */
+  #connectTokenErrorFn
+
+  /**
    * The client event bindings for this instance as bound with `bind`/`unbind`
    * (read-only). This map stores event bindings, with the event names (strings
    * or RegExp objects) as keys and arrays of Binding objects as values.
@@ -76,10 +96,10 @@ export class HotsockClient {
   #channelEventBindings = {}
 
   /**
-   * The currently active WebSocket connection (read-only).
+   * The currently active Connection object for this client (read-only).
    *
    * @readonly
-   * @returns {Connection} The active connection object
+   * @returns {Connection} The active Connection object for this client.
    */
   get activeConnection() {
     return this.#activeConnection
@@ -116,6 +136,10 @@ export class HotsockClient {
    * attempt loading the connect JWT by calling `connectTokenFn`. Defaults to
    * 2. Each attempt has a backoff wait that is 500ms longer than the previous
    * attempt.
+   * @param {function} [options.connectTokenErrorFn] A function that is called
+   * after retries on the `connectTokenFn` have been reached and no further
+   * attempts to load it will be made. If this callback function is not
+   * supplied, the error is thrown.
    * @param {boolean} [options.lazyConnection] If true, a connection will not
    * attempt to be established until there's an attempt to subscribe to a
    * channel. This is particularly useful when you use a single global
@@ -133,6 +157,7 @@ export class HotsockClient {
     {
       connectTokenFn,
       connectTokenFnMaxAttempts = 2,
+      connectTokenErrorFn,
       lazyConnection = false,
       logger,
       logLevel = "warn",
@@ -150,6 +175,12 @@ export class HotsockClient {
 
     this.#connectTokenFn = connectTokenFn
     this.#connectTokenFnMaxAttempts = connectTokenFnMaxAttempts
+
+    if (connectTokenErrorFn && typeof connectTokenErrorFn !== "function") {
+      throw new TypeError("connectTokenErrorFn must be a function")
+    }
+
+    this.#connectTokenErrorFn = connectTokenErrorFn
 
     this.#logger = this.#createLogger(logLevel)
     if (logger) {
@@ -640,10 +671,20 @@ class Connection {
    * @async
    */
   async initialize() {
-    const token = await this.loadTokenWithRetry(
-      this.#client.connectTokenFn,
-      this.#client.connectTokenFnMaxAttempts
-    )
+    let token
+    try {
+      token = await this.loadTokenWithRetry(
+        this.#client.connectTokenFn,
+        this.#client.connectTokenFnMaxAttempts
+      )
+    } catch (error) {
+      if (this.#client.connectTokenErrorFn) {
+        this.#client.connectTokenErrorFn(error)
+        return
+      }
+
+      throw error
+    }
 
     this.#client.logger.debug(
       `[hotsock] connecting to "${
@@ -659,10 +700,14 @@ class Connection {
   }
 
   /**
-   * Allows awaiting the WebSocket initialize call. Does not await the
-   * actual WebSocket connection being opened. Primarily used for tests.
+   * Allows awaiting the connection initialize call. Does not await the actual
+   * WebSocket connection being opened, but any errors with the WebSocket
+   * connection could be handled in `onerror`. This is typically useful when
+   * you want to catch token loading errors gracefully after the maximum
+   * number of attempts using async/await.
    *
    * @private
+   * @returns {Promise}
    */
   initializationComplete = () => {
     return this.#initializePromise
@@ -713,7 +758,7 @@ class Connection {
    */
   close() {
     this.#autoReconnect = false
-    this.#ws.close()
+    this.#ws?.close()
   }
 
   /**
@@ -1031,11 +1076,47 @@ class Connection {
   }
 
   /** @private */
-  looksLikeJWT = (token) => {
+  looksLikeJwt = (token) => {
     return (
       typeof token === "string" &&
       /^[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]*$/.test(token)
     )
+  }
+
+  /** @private */
+  isJwtExpired = (token) => {
+    try {
+      const payloadBase64 = token.split(".")[1]
+      const decodedPayload = this.payloadFromJwtSegment(payloadBase64)
+      const currentTime = Math.floor(Date.now() / 1000)
+      return decodedPayload.exp && decodedPayload.exp < currentTime
+    } catch (_) {
+      return true
+    }
+  }
+
+  /** @private */
+  decodeBase64 = (base64String) => {
+    if (typeof atob === "function") {
+      // web env
+      return atob(base64String)
+    } else if (BufferInstance) {
+      // node env
+      return BufferInstance.from(base64String, "base64").toString("utf-8")
+    } else {
+      throw new Error("Base64 decoding not supported in this environment")
+    }
+  }
+
+  /** @private */
+  payloadFromJwtSegment = (segmentBase64) => {
+    try {
+      return JSON.parse(
+        this.decodeBase64(segmentBase64.replace(/-/g, "+").replace(/_/g, "/"))
+      )
+    } catch (_) {
+      throw new Error(`Invalid JWT segment ${segmentBase64}`)
+    }
   }
 
   /**
@@ -1050,14 +1131,16 @@ class Connection {
       try {
         const token = await tokenFn()
 
-        if (token) {
-          if (this.looksLikeJWT(token)) {
-            return token
-          } else {
-            throw new Error(
-              "Invalid token format: token returned by function must be a valid JWT string"
-            )
-          }
+        if (!this.looksLikeJwt(token)) {
+          throw new Error(
+            "Invalid token format: token returned by function must be a valid JWT string"
+          )
+        } else if (this.isJwtExpired(token)) {
+          throw new Error(
+            "Invalid token: token returned by function is expired"
+          )
+        } else {
+          return token
         }
       } catch (error) {
         this.#client.logger.warn(
@@ -1072,7 +1155,7 @@ class Connection {
       }
     }
 
-    throw new Error("Failed to load token after maximum attempts")
+    throw new Error("Failed to load a valid token after maximum attempts")
   }
 }
 
@@ -1353,6 +1436,13 @@ class Binding {
  */
 
 /**
+ * A function that is called when all retries to fetch a token are exhausted.
+ * It takes an Error as an argument.
+ *
+ * @typedef {function(Error): void} LoadTokenErrorFn
+ */
+
+/**
  * A function type for handling messages. This function takes a message
  * as an argument and does not return anything.
  *
@@ -1389,7 +1479,6 @@ class Binding {
  * @property {function(...any): void} error - Error logging method.
  * @property {function(string): void} setLevel - Set log level method.
  */
-
 class InvalidArgumentError extends Error {
   constructor(message) {
     super(message)

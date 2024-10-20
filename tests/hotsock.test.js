@@ -38,8 +38,27 @@ global.WebSocket = MockWebSocket
 global.runner = "test"
 
 const wssBaseUrl = "wss://996iaxdp6g.execute-api.us-east-1.amazonaws.com/v1"
+const testValidToken =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjaGFubmVscyI6eyIqIjp7InN1YnNjcmliZSI6dHJ1ZX19LCJleHAiOjQ4ODUxMDkwNTEsInNjb3BlIjoiY29ubmVjdCIsInVpZCI6ImphbWVzIn0.pMsYKBqW9zqS55l_UZoOkywrosDZJfU2SOSJWpuCEps"
+const testMalformedToken = "hey"
+const testNotActuallyAToken = "a.b.c"
+const testExpiredToken =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjaGFubmVscyI6eyIqIjp7InN1YnNjcmliZSI6dHJ1ZX19LCJleHAiOjE3Mjk0NDEyODksInNjb3BlIjoiY29ubmVjdCIsInVpZCI6ImphbWVzIn0.BgOcCHzzDazIaVIiVzLY3MMZ-dNzArAF8sFxM_jY7vg"
 
 describe("HotsockClient constructor", () => {
+  let consoleWarnSpy
+  let consoleErrorSpy
+
+  beforeEach(() => {
+    consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {}) // Suppress console.warn
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
+  })
+
+  afterEach(() => {
+    consoleWarnSpy.mockRestore() // Restore console.warn
+    consoleErrorSpy.mockRestore() // Restore console.error
+  })
+
   test("should throw an error if no webSocketUrl is provided", () => {
     expect(() => new HotsockClient()).toThrow("webSocketUrl must be provided")
   })
@@ -54,14 +73,57 @@ describe("HotsockClient constructor", () => {
     )
   })
 
+  test("should throw an error if connectTokenFn returns something that does not resemble a token", async () => {
+    await expect(async () => {
+      const hotsock = new HotsockClient(wssBaseUrl, {
+        connectTokenFn: () => testMalformedToken,
+      })
+      await hotsock.activeConnection.initializationComplete()
+    }).rejects.toThrow("Failed to load a valid token after maximum attempts")
+  })
+
+  test("should throw an error if connectTokenFn returns a token that isn't a parseable JWT", async () => {
+    await expect(async () => {
+      const hotsock = new HotsockClient(wssBaseUrl, {
+        connectTokenFn: () => testNotActuallyAToken,
+      })
+      await hotsock.activeConnection.initializationComplete()
+    }).rejects.toThrow("Failed to load a valid token after maximum attempts")
+  })
+
+  test("should throw an error if connectTokenFn returns an expired token", async () => {
+    await expect(async () => {
+      const hotsock = new HotsockClient(wssBaseUrl, {
+        connectTokenFn: () => testExpiredToken,
+      })
+      await hotsock.activeConnection.initializationComplete()
+    }).rejects.toThrow("Failed to load a valid token after maximum attempts")
+  })
+
+  test("should call connectTokenErrorFn if connectTokenFn returns an expired token", async () => {
+    const mockErrorFn = jest.fn()
+
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testExpiredToken,
+      connectTokenErrorFn: mockErrorFn,
+    })
+
+    await hotsock.activeConnection.initializationComplete()
+
+    expect(mockErrorFn).toHaveBeenCalled()
+    expect(mockErrorFn.mock.calls[0][0].message).toBe(
+      "Failed to load a valid token after maximum attempts"
+    )
+  })
+
   test("should create an instance with valid webSocketUrl and connectTokenFn", () => {
     const hotsock = new HotsockClient(wssBaseUrl, {
-      connectTokenFn: () => "a.b.c",
+      connectTokenFn: () => testValidToken,
     })
 
     expect(hotsock).toBeInstanceOf(HotsockClient)
     expect(hotsock.webSocketUrl).toBe(wssBaseUrl)
-    expect(hotsock.connectTokenFn()).toBe("a.b.c")
+    expect(hotsock.connectTokenFn()).toBe(testValidToken)
   })
 })
 
@@ -74,8 +136,7 @@ describe("HotsockClient WebSocket lifecycle / mock verification", () => {
 
   beforeEach(async () => {
     hotsock = new HotsockClient(wssBaseUrl, {
-      connectTokenFn: () =>
-        "eyJhbGciOiJFUzI1NiIsImtpZCI6IjkxMTI2MjEwIiwidHlwIjoiSldUIn0.eyJjaGFubmVscyI6eyIqIjp7InN1YnNjcmliZSI6dHJ1ZX19LCJleHAiOjE3MDEyMjYxNTEsInNjb3BlIjoiY29ubmVjdCIsInVpZCI6ImphbWVzIn0.qq0SWcPvowd3nYfkx9h-rEOpdf0hP2TfslYdUJ5CH8sSP920BpgzyukvGUJqWFwYn72LUbOFxQ1QkvsSR-aKYQ",
+      connectTokenFn: () => testValidToken,
     })
     await hotsock.activeConnection.initializationComplete()
     mockWebSocket = hotsock.activeConnection.ws
@@ -83,10 +144,7 @@ describe("HotsockClient WebSocket lifecycle / mock verification", () => {
 
   test("has a correct URL + token", () => {
     expect(mockWebSocket).toBeDefined()
-    expect(mockWebSocket.url).toBe(
-      wssBaseUrl +
-        "?token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjkxMTI2MjEwIiwidHlwIjoiSldUIn0.eyJjaGFubmVscyI6eyIqIjp7InN1YnNjcmliZSI6dHJ1ZX19LCJleHAiOjE3MDEyMjYxNTEsInNjb3BlIjoiY29ubmVjdCIsInVpZCI6ImphbWVzIn0.qq0SWcPvowd3nYfkx9h-rEOpdf0hP2TfslYdUJ5CH8sSP920BpgzyukvGUJqWFwYn72LUbOFxQ1QkvsSR-aKYQ"
-    )
+    expect(mockWebSocket.url).toBe(wssBaseUrl + `?token=${testValidToken}`)
   })
 
   test("triggers onopen", (done) => {
@@ -153,8 +211,7 @@ describe("public API", () => {
 
   beforeEach(async () => {
     hotsock = new HotsockClient(wssBaseUrl, {
-      connectTokenFn: () =>
-        "eyJhbGciOiJFUzI1NiIsImtpZCI6IjkxMTI2MjEwIiwidHlwIjoiSldUIn0.eyJjaGFubmVscyI6eyIqIjp7InN1YnNjcmliZSI6dHJ1ZX19LCJleHAiOjE3MDEyMjYxNTEsInNjb3BlIjoiY29ubmVjdCIsInVpZCI6ImphbWVzIn0.qq0SWcPvowd3nYfkx9h-rEOpdf0hP2TfslYdUJ5CH8sSP920BpgzyukvGUJqWFwYn72LUbOFxQ1QkvsSR-aKYQ",
+      connectTokenFn: () => testValidToken,
     })
     await hotsock.activeConnection.initializationComplete()
     mockWebSocket = hotsock.activeConnection.ws
