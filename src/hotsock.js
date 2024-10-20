@@ -569,6 +569,35 @@ class Connection {
   }
 
   /**
+   * The server-provided connection secret (read-only).
+   *
+   * @readonly
+   * @returns {string=}
+   */
+  get connectionSecret() {
+    return this.#connectionSecret
+  }
+
+  /** @private @type {string=} */
+  #connectionSecret
+
+  /**
+   * The server-provided connection expires at date (read-only).
+   *
+   * @readonly
+   * @returns {Date=}
+   */
+  get connectionExpiresAt() {
+    if (this.#connectionExpiresAt) {
+      // Convert RFC3339 timestamp string to a JS Date object
+      return new Date(this.#connectionExpiresAt)
+    }
+  }
+
+  /** @private @type {string=} */
+  #connectionExpiresAt
+
+  /**
    * The user ID (uid) for the current user of this connection (read-only).
    *
    * @readonly
@@ -843,6 +872,8 @@ class Connection {
       case "hotsock.connected":
         this.#uid = message.meta.uid
         this.#umd = message.meta.umd
+        this.#connectionSecret = message.data.connectionSecret
+        this.#connectionExpiresAt = message.data.connectionExpiresAt
         this.#setConnectionId(message.data.connectionId)
         break
       case "hotsock.subscribed":
