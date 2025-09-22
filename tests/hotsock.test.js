@@ -657,11 +657,11 @@ describe("public API", () => {
     test("missing event throws", () => {
       expect(() => {
         hotsock.sendMessage()
-      }).toThrow(new TypeError("event must be provided"))
+      }).toThrow("event must be provided")
 
       expect(() => {
         hotsock.sendMessage("")
-      }).toThrow(new TypeError("event must be provided"))
+      }).toThrow("event must be provided")
     })
     test("valid minimal event sends to WebSocket", () => {
       hotsock.sendMessage("my-event")
@@ -687,6 +687,146 @@ describe("public API", () => {
       hotsock.sendRawMessage(message)
       expect(mockWebSocket.send).toHaveBeenCalledTimes(1)
       expect(mockWebSocket.send).toHaveBeenCalledWith(message)
+    })
+  })
+
+  describe("auto-subscription behavior", () => {
+    describe("when a channel is auto-subscribed", () => {
+      beforeEach(() => {
+        // Simulate auto-subscription from server
+        mockWebSocket.receiveMessage(
+          JSON.stringify({
+            event: "hotsock.subscribed",
+            channel: "auto-channel",
+            data: { autoSubscribed: true },
+            meta: { uid: "test-user", umd: { role: "viewer" } },
+          })
+        )
+      })
+
+      test("sets autoSubscribed to true", () => {
+        expect(
+          hotsock.activeConnection.channels["auto-channel"].autoSubscribed
+        ).toBe(true)
+      })
+
+      test("does not unsubscribe when manageSubscriptions runs with no bindings", () => {
+        // Clear any send calls from setup
+        mockWebSocket.send.mockClear()
+
+        // Run manageSubscriptions - should not call unsubscribe
+        hotsock.activeConnection.manageSubscriptions()
+
+        // Verify no unsubscribe message was sent
+        expect(mockWebSocket.send).not.toHaveBeenCalledWith(
+          JSON.stringify({
+            event: "hotsock.unsubscribe",
+            channel: "auto-channel",
+          })
+        )
+      })
+
+      test("channel remains in subscribeConfirmed state", () => {
+        // Run manageSubscriptions
+        hotsock.activeConnection.manageSubscriptions()
+
+        expect(hotsock.activeConnection.channels["auto-channel"].state).toBe(
+          "subscribeConfirmed"
+        )
+      })
+    })
+
+    describe("when a channel is manually subscribed", () => {
+      beforeEach(() => {
+        // Simulate manual subscription from server (no auto flag)
+        mockWebSocket.receiveMessage(
+          JSON.stringify({
+            event: "hotsock.subscribed",
+            channel: "manual-channel",
+            data: {},
+            meta: { uid: "test-user", umd: { role: "viewer" } },
+          })
+        )
+      })
+
+      test("sets autoSubscribed to false", () => {
+        expect(
+          hotsock.activeConnection.channels["manual-channel"].autoSubscribed
+        ).toBe(false)
+      })
+
+      test("unsubscribes when manageSubscriptions runs with no bindings", () => {
+        // Clear any send calls from setup
+        mockWebSocket.send.mockClear()
+
+        // Run manageSubscriptions - should call unsubscribe
+        hotsock.activeConnection.manageSubscriptions()
+
+        // Verify unsubscribe message was sent
+        expect(mockWebSocket.send).toHaveBeenCalledWith(
+          JSON.stringify({
+            event: "hotsock.unsubscribe",
+            channel: "manual-channel",
+          })
+        )
+      })
+    })
+
+    describe("mixed auto and manual subscriptions", () => {
+      beforeEach(() => {
+        // Auto-subscribed channel
+        mockWebSocket.receiveMessage(
+          JSON.stringify({
+            event: "hotsock.subscribed",
+            channel: "auto-channel",
+            data: { autoSubscribed: true },
+            meta: { uid: "test-user", umd: null },
+          })
+        )
+
+        // Manually subscribed channel
+        mockWebSocket.receiveMessage(
+          JSON.stringify({
+            event: "hotsock.subscribed",
+            channel: "manual-channel",
+            data: {},
+            meta: { uid: "test-user", umd: null },
+          })
+        )
+      })
+
+      test("only unsubscribes from manual channel when no bindings exist", () => {
+        // Clear any send calls from setup
+        mockWebSocket.send.mockClear()
+
+        // Run manageSubscriptions
+        hotsock.activeConnection.manageSubscriptions()
+
+        // Should only unsubscribe from manual channel
+        expect(mockWebSocket.send).toHaveBeenCalledWith(
+          JSON.stringify({
+            event: "hotsock.unsubscribe",
+            channel: "manual-channel",
+          })
+        )
+        expect(mockWebSocket.send).not.toHaveBeenCalledWith(
+          JSON.stringify({
+            event: "hotsock.unsubscribe",
+            channel: "auto-channel",
+          })
+        )
+      })
+
+      test("auto channel stays subscribed while manual channel gets unsubscribed", () => {
+        hotsock.activeConnection.manageSubscriptions()
+
+        expect(hotsock.activeConnection.channels["auto-channel"].state).toBe(
+          "subscribeConfirmed"
+        )
+        expect(hotsock.activeConnection.channels["manual-channel"].state).toBe(
+          "unsubscribePending"
+        )
+      })
     })
   })
 })

@@ -884,6 +884,7 @@ class Connection {
         this.channels[channel].umd = umd
         this.channels[channel].members = data.members || []
         this.channels[channel].state = "subscribeConfirmed"
+        this.channels[channel].autoSubscribed = data.autoSubscribed === true
         break
       case "hotsock.unsubscribed":
         this.channels[channel] ||= new ConnectionChannel(channel)
@@ -1003,7 +1004,8 @@ class Connection {
     Object.keys(this.channels).forEach((channel) => {
       if (
         (this.#client.channelEventBindings[channel] || []).length === 0 &&
-        unsubscribeableStates.includes(this.channels[channel]?.state)
+        unsubscribeableStates.includes(this.channels[channel]?.state) &&
+        !this.channels[channel]?.autoSubscribed
       ) {
         unsubscribedChannels.push(channel)
         this.unsubscribe(channel)
@@ -1229,9 +1231,13 @@ class ConnectionChannel {
   /** @public @type {JsonSerializable} */
   umd
 
+  /** @public @type {boolean} */
+  autoSubscribed
+
   constructor(name) {
     this.name = name
     this.members = []
+    this.autoSubscribed = false
   }
 }
 
