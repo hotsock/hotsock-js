@@ -1,0 +1,76 @@
+# Development and build tools
+.babelrc
+jest.config.js
+rollup.config.mjs
+
+# Test files and coverage
+tests/
+coverage/
+*.test.js
+*.spec.js
+
+# Development dependencies and lock files
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD and deployment
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+.jenkins/
+
+# Documentation and meta files (keep README.md and LICENSE)
+CHANGELOG.md
+CONTRIBUTING.md
+.editorconfig
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment and config files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Claude Code specific
+.claude/
+
+# Temporary and cache files
+.tmp/
+.cache/
+*.tmp
+*.temp
+
+# Build artifacts that shouldn't be published
+dist/
+build/
