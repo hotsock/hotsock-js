@@ -26,6 +26,8 @@ class MockWebSocket {
   }
 
   close() {
+    if (this.readyState === 3) return
+    this.readyState = 3
     setTimeout(() => this.onclose(), 0) // Simulate async close event
   }
 
@@ -124,6 +126,7 @@ describe("HotsockClient constructor", () => {
     expect(hotsock).toBeInstanceOf(HotsockClient)
     expect(hotsock.webSocketUrl).toBe(wssBaseUrl)
     expect(hotsock.connectTokenFn()).toBe(testValidToken)
+    hotsock.terminate()
   })
 })
 
@@ -140,6 +143,10 @@ describe("HotsockClient WebSocket lifecycle / mock verification", () => {
     })
     await hotsock.activeConnection.initializationComplete()
     mockWebSocket = hotsock.activeConnection.ws
+  })
+
+  afterEach(() => {
+    hotsock.terminate()
   })
 
   test("has a correct URL + token", () => {
@@ -215,6 +222,10 @@ describe("public API", () => {
     })
     await hotsock.activeConnection.initializationComplete()
     mockWebSocket = hotsock.activeConnection.ws
+  })
+
+  afterEach(() => {
+    hotsock.terminate()
   })
 
   describe("bind()", () => {
