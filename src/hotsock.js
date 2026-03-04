@@ -688,6 +688,16 @@ class Connection {
   #autoReconnect = true
 
   /**
+   * Timeout ID for the connected message timeout. If the hotsock.connected
+   * message is not received within 5 seconds of the WebSocket opening, the
+   * connection is closed and reconnection is attempted.
+   *
+   * @type {number}
+   * @private
+   */
+  #connectedTimeoutId
+
+  /**
    * @type {Promise}
    * @private
    */
@@ -843,6 +853,7 @@ class Connection {
    * @private
    */
   close() {
+    clearTimeout(this.#connectedTimeoutId)
     this.#autoReconnect = false
     this.#ws?.close()
   }
@@ -875,6 +886,16 @@ class Connection {
     const clientBindings =
       this.#client.clientEventBindings.get("@@connect") || []
     clientBindings.forEach(({ messageFn }) => messageFn(wsEvent))
+
+    // If hotsock.connected isn't received within 5s, close and reconnect.
+    this.#connectedTimeoutId = setTimeout(() => {
+      if (this.#connectionId === undefined) {
+        this.#client.logger.warn(
+          "[hotsock] did not receive hotsock.connected within timeout, reconnecting",
+        )
+        this.#ws?.close()
+      }
+    }, 5000)
   }
 
   /**
@@ -884,6 +905,7 @@ class Connection {
    * @param {Event} wsEvent
    */
   onclose = (wsEvent) => {
+    clearTimeout(this.#connectedTimeoutId)
     this.#client.logger.debug(
       `[hotsock] connection "${this.#connectionIdLogDescription}" disconnected`,
     )
@@ -929,6 +951,7 @@ class Connection {
 
     switch (event) {
       case "hotsock.connected":
+        clearTimeout(this.#connectedTimeoutId)
         this.#uid = message.meta.uid
         this.#umd = message.meta.umd
         this.#connectionSecret = message.data.connectionSecret
