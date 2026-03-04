@@ -854,6 +854,7 @@ class Connection {
    */
   close() {
     clearTimeout(this.#connectedTimeoutId)
+
     this.#autoReconnect = false
     this.#ws?.close()
   }
@@ -906,6 +907,7 @@ class Connection {
    */
   onclose = (wsEvent) => {
     clearTimeout(this.#connectedTimeoutId)
+
     this.#client.logger.debug(
       `[hotsock] connection "${this.#connectionIdLogDescription}" disconnected`,
     )
@@ -952,6 +954,7 @@ class Connection {
     switch (event) {
       case "hotsock.connected":
         clearTimeout(this.#connectedTimeoutId)
+
         this.#uid = message.meta.uid
         this.#umd = message.meta.umd
         this.#connectionSecret = message.data.connectionSecret
