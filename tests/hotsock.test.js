@@ -26,6 +26,8 @@ class MockWebSocket {
   }
 
   close() {
+    if (this.readyState === 3) return
+    this.readyState = 3
     setTimeout(() => this.onclose(), 0) // Simulate async close event
   }
 
@@ -124,6 +126,7 @@ describe("HotsockClient constructor", () => {
     expect(hotsock).toBeInstanceOf(HotsockClient)
     expect(hotsock.webSocketUrl).toBe(wssBaseUrl)
     expect(hotsock.connectTokenFn()).toBe(testValidToken)
+    hotsock.terminate()
   })
 })
 
@@ -140,6 +143,10 @@ describe("HotsockClient WebSocket lifecycle / mock verification", () => {
     })
     await hotsock.activeConnection.initializationComplete()
     mockWebSocket = hotsock.activeConnection.ws
+  })
+
+  afterEach(() => {
+    hotsock.terminate()
   })
 
   test("has a correct URL + token", () => {
@@ -215,6 +222,10 @@ describe("public API", () => {
     })
     await hotsock.activeConnection.initializationComplete()
     mockWebSocket = hotsock.activeConnection.ws
+  })
+
+  afterEach(() => {
+    hotsock.terminate()
   })
 
   describe("bind()", () => {
@@ -831,6 +842,184 @@ describe("public API", () => {
   })
 })
 
+describe("connected message timeout", () => {
+  let consoleWarnSpy
+  let consoleDebugSpy
+  let originalWebSocket
+
+  // A WebSocket mock that opens successfully but never sends hotsock.connected
+  class OpenButSilentWebSocket {
+    constructor(url) {
+      this.url = url
+      this.readyState = 1 // OPEN
+      this.send = jest.fn()
+      this.onerror = () => {}
+      this.onopen = () => {}
+      this.onclose = () => {}
+      this.onmessage = () => {}
+      this.closeCalled = false
+
+      setTimeout(() => this.onopen(), 0)
+    }
+    close() {
+      this.closeCalled = true
+      this.readyState = 3
+      setTimeout(() => this.onclose(), 0)
+    }
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    consoleDebugSpy = jest.spyOn(console, "debug").mockImplementation(() => {})
+    originalWebSocket = global.WebSocket
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    consoleWarnSpy.mockRestore()
+    consoleDebugSpy.mockRestore()
+    global.WebSocket = originalWebSocket
+  })
+
+  test("closes the WebSocket if hotsock.connected is not received within 5 seconds", async () => {
+    global.WebSocket = OpenButSilentWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Let the WebSocket open
+    await jest.advanceTimersByTimeAsync(1)
+
+    const ws = hotsock.activeConnection.ws
+    expect(ws.closeCalled).toBe(false)
+
+    // Advance to just before 5s — should not have closed
+    await jest.advanceTimersByTimeAsync(4998)
+    expect(ws.closeCalled).toBe(false)
+
+    // Advance past 5s — should close
+    await jest.advanceTimersByTimeAsync(2)
+    expect(ws.closeCalled).toBe(true)
+
+    hotsock.terminate()
+  })
+
+  test("does not close the WebSocket if hotsock.connected is received in time", async () => {
+    global.WebSocket = OpenButSilentWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Let the WebSocket open
+    await jest.advanceTimersByTimeAsync(1)
+
+    const ws = hotsock.activeConnection.ws
+
+    // Simulate hotsock.connected arriving at 2 seconds
+    await jest.advanceTimersByTimeAsync(2000)
+    ws.onmessage({
+      data: JSON.stringify({
+        event: "hotsock.connected",
+        data: {
+          connectionId: "test-conn-id",
+          connectionSecret: "test-secret",
+          connectionExpiresAt: "2099-01-01T00:00:00Z",
+        },
+        meta: { uid: "test-uid", umd: null },
+      }),
+    })
+
+    // Advance well past the 5s timeout — should NOT have closed
+    await jest.advanceTimersByTimeAsync(10000)
+    expect(ws.closeCalled).toBe(false)
+
+    hotsock.terminate()
+  })
+
+  test("triggers reconnection after the timeout closes the connection", async () => {
+    let connectionCount = 0
+
+    global.WebSocket = class extends OpenButSilentWebSocket {
+      constructor(url) {
+        super(url)
+        connectionCount++
+      }
+    }
+
+    const connectTokenFn = jest.fn(() => testValidToken)
+    jest.spyOn(Math, "random").mockReturnValue(0)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Let the WebSocket open
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectionCount).toBe(1)
+
+    // Advance past 5s to trigger the timeout close
+    await jest.advanceTimersByTimeAsync(5000)
+
+    // Let onclose fire and trigger reconnectWithBackoff
+    await jest.advanceTimersByTimeAsync(1)
+
+    // The reconnect creates a new connection immediately (first attempt)
+    expect(connectionCount).toBe(2)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    Math.random.mockRestore()
+    hotsock.terminate()
+  })
+
+  test("clears the timeout when the connection closes for other reasons", async () => {
+    global.WebSocket = OpenButSilentWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Let the WebSocket open
+    await jest.advanceTimersByTimeAsync(1)
+
+    const ws = hotsock.activeConnection.ws
+
+    // Close the WebSocket at 2s for an unrelated reason
+    await jest.advanceTimersByTimeAsync(2000)
+    ws.close()
+
+    // Let onclose fire
+    await jest.advanceTimersByTimeAsync(1)
+
+    // Reset closeCalled tracking — the close already happened once
+    ws.closeCalled = false
+
+    // Advance well past the 5s timeout — should NOT trigger another close
+    await jest.advanceTimersByTimeAsync(10000)
+    expect(ws.closeCalled).toBe(false)
+
+    hotsock.terminate()
+  })
+
+  test("clears the timeout on intentional close() via suspend", async () => {
+    global.WebSocket = OpenButSilentWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Let the WebSocket open
+    await jest.advanceTimersByTimeAsync(1)
+
+    const ws = hotsock.activeConnection.ws
+
+    // Suspend at 2s (calls close() on the connection)
+    await jest.advanceTimersByTimeAsync(2000)
+    hotsock.suspend()
+
+    // Let onclose fire
+    await jest.advanceTimersByTimeAsync(1)
+
+    // Reset closeCalled tracking
+    ws.closeCalled = false
+
+    // Advance well past the 5s timeout — should NOT trigger another close
+    await jest.advanceTimersByTimeAsync(10000)
+    expect(ws.closeCalled).toBe(false)
+  })
+})
+
 describe("reconnectWithBackoff", () => {
   let consoleWarnSpy
   let consoleDebugSpy
@@ -1038,6 +1227,19 @@ describe("reconnectWithBackoff", () => {
     expect(connectionCount).toBe(3)
     expect(connectTokenFn).toHaveBeenCalledTimes(3)
     await jest.advanceTimersByTimeAsync(1) // let it open
+
+    // Simulate server sending hotsock.connected on the successful connection
+    hotsock.activeConnection.ws.onmessage({
+      data: JSON.stringify({
+        event: "hotsock.connected",
+        data: {
+          connectionId: "test-conn-id",
+          connectionSecret: "test-secret",
+          connectionExpiresAt: "2099-01-01T00:00:00Z",
+        },
+        meta: { uid: "test-uid", umd: null },
+      }),
+    })
 
     // No more reconnect attempts should happen
     await jest.advanceTimersByTimeAsync(30000)
