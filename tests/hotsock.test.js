@@ -830,3 +830,220 @@ describe("public API", () => {
     })
   })
 })
+
+describe("reconnectWithBackoff", () => {
+  let consoleWarnSpy
+  let consoleDebugSpy
+  let originalWebSocket
+  let mathRandomSpy
+
+  // A WebSocket mock that immediately closes (simulating network failure)
+  class ImmediateCloseWebSocket {
+    constructor(url) {
+      this.url = url
+      this.readyState = 3 // CLOSED
+      this.send = jest.fn()
+      this.onerror = () => {}
+      this.onopen = () => {}
+      this.onclose = () => {}
+      this.onmessage = () => {}
+      setTimeout(() => this.onclose(), 0)
+    }
+    close() {
+      setTimeout(() => this.onclose(), 0)
+    }
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    consoleDebugSpy = jest.spyOn(console, "debug").mockImplementation(() => {})
+    originalWebSocket = global.WebSocket
+    // Remove jitter so backoff timing is deterministic
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(0)
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    consoleWarnSpy.mockRestore()
+    consoleDebugSpy.mockRestore()
+    mathRandomSpy.mockRestore()
+    global.WebSocket = originalWebSocket
+  })
+
+  test("does not rapidly call connectTokenFn when WebSocket immediately closes", async () => {
+    global.WebSocket = ImmediateCloseWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Let initial connection initialize and its WebSocket close.
+    // The first reconnect attempt fires immediately (no delay), so we get
+    // 2 calls: initial connection + immediate first reconnect attempt.
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    // Let the first reconnect attempt's WebSocket close
+    await jest.advanceTimersByTimeAsync(1)
+
+    // After 500ms, should NOT have fetched another token (backoff is 1000ms)
+    await jest.advanceTimersByTimeAsync(500)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    // After 1000ms total, the second reconnect attempt fires
+    await jest.advanceTimersByTimeAsync(500)
+    expect(connectTokenFn).toHaveBeenCalledTimes(3)
+
+    // Let that WebSocket close too
+    await jest.advanceTimersByTimeAsync(1)
+
+    // Next backoff is 1500ms (1000 * 1.5, jitter=0). Should NOT fire at 1000ms.
+    await jest.advanceTimersByTimeAsync(1000)
+    expect(connectTokenFn).toHaveBeenCalledTimes(3)
+
+    // Should fire at 1500ms
+    await jest.advanceTimersByTimeAsync(500)
+    expect(connectTokenFn).toHaveBeenCalledTimes(4)
+
+    hotsock.terminate()
+  })
+
+  test("backoff delay increases with each failed attempt", async () => {
+    global.WebSocket = ImmediateCloseWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Initial connection + close + immediate first reconnect (also closes).
+    // All resolves within the first tick.
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    // With jitter=0, backoff sequence: 1000, 1500, 2250, 3375
+    const expectedDelays = [1000, 1500, 2250, 3375]
+
+    for (let i = 0; i < expectedDelays.length; i++) {
+      const delay = expectedDelays[i]
+      const callsBefore = connectTokenFn.mock.calls.length
+
+      // Advance to just before the delay - should not have fired
+      await jest.advanceTimersByTimeAsync(delay - 2)
+      expect(connectTokenFn).toHaveBeenCalledTimes(callsBefore)
+
+      // Advance past the delay - should fire (and the new WS close resolves
+      // within the same tick, scheduling the next backoff)
+      await jest.advanceTimersByTimeAsync(3)
+      expect(connectTokenFn).toHaveBeenCalledTimes(callsBefore + 1)
+    }
+
+    hotsock.terminate()
+  })
+
+  test("onclose does not start duplicate reconnect loops", async () => {
+    global.WebSocket = ImmediateCloseWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Initial connection + close + immediate first reconnect = 2 calls
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    // Let reconnect WS close
+    await jest.advanceTimersByTimeAsync(1)
+
+    // Manually call reconnectWithBackoff again (simulating duplicate onclose)
+    hotsock.reconnectWithBackoff()
+    hotsock.reconnectWithBackoff()
+
+    // After 1000ms, should have exactly 1 more reconnect attempt (not 3 more)
+    await jest.advanceTimersByTimeAsync(1000)
+    expect(connectTokenFn).toHaveBeenCalledTimes(3)
+
+    hotsock.terminate()
+  })
+
+  test("suspend() cancels the reconnection loop", async () => {
+    global.WebSocket = ImmediateCloseWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Initial connection + close + immediate first reconnect = 2 calls
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    // Suspend cancels the reconnection loop
+    hotsock.suspend()
+
+    // Advance well past when reconnect would have fired
+    await jest.advanceTimersByTimeAsync(30000)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2) // No additional calls
+  })
+
+  test("terminate() cancels the reconnection loop", async () => {
+    global.WebSocket = ImmediateCloseWebSocket
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Initial connection + close + immediate first reconnect = 2 calls
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    // Terminate cancels the reconnection loop
+    hotsock.terminate()
+
+    // Advance well past when reconnect would have fired
+    await jest.advanceTimersByTimeAsync(30000)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2) // No additional calls
+  })
+
+  test("successful reconnection stops the backoff loop", async () => {
+    let connectionCount = 0
+
+    // First 2 connections immediately close, third one opens successfully
+    global.WebSocket = class ConditionalWebSocket {
+      constructor(url) {
+        this.url = url
+        this.send = jest.fn()
+        this.onerror = () => {}
+        this.onopen = () => {}
+        this.onclose = () => {}
+        this.onmessage = () => {}
+        connectionCount++
+
+        if (connectionCount <= 2) {
+          this.readyState = 3
+          setTimeout(() => this.onclose(), 0)
+        } else {
+          this.readyState = 1
+          setTimeout(() => this.onopen(), 0)
+        }
+      }
+      close() {
+        setTimeout(() => this.onclose(), 0)
+      }
+    }
+
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+    // Connection 1 (initial) immediately closes.
+    // Connection 2 (immediate first reconnect) also immediately closes.
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectionCount).toBe(2)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    // Let connection 2's WebSocket close
+    await jest.advanceTimersByTimeAsync(1)
+
+    // Connection 3: reconnect after 1000ms backoff, opens successfully
+    await jest.advanceTimersByTimeAsync(1000)
+    expect(connectionCount).toBe(3)
+    expect(connectTokenFn).toHaveBeenCalledTimes(3)
+    await jest.advanceTimersByTimeAsync(1) // let it open
+
+    // No more reconnect attempts should happen
+    await jest.advanceTimersByTimeAsync(30000)
+    expect(connectionCount).toBe(3)
+    expect(connectTokenFn).toHaveBeenCalledTimes(3)
+
+    hotsock.terminate()
+  })
+})
