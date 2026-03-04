@@ -17,11 +17,11 @@
     "subscriptions"
   ],
   "devDependencies": {
-    "@babel/core": "^7.28.4",
-    "@babel/preset-env": "^7.28.3",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.0",
     "@rollup/plugin-terser": "^0.4.4",
-    "jest": "^30.1.3",
-    "rollup": "^4.52.0"
+    "jest": "^30.2.0",
+    "rollup": "^4.59.0"
   },
   "prettier": {
     "semi": false
