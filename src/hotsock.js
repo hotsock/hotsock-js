@@ -109,6 +109,15 @@ export class HotsockClient {
   #activeConnection = null
 
   /**
+   * Whether a reconnection loop is currently active. Prevents duplicate
+   * reconnect loops from being started by onclose handlers.
+   *
+   * @type {boolean}
+   * @private
+   */
+  #reconnecting = false
+
+  /**
    * The client logger (read-only).
    *
    * @readonly
@@ -406,6 +415,7 @@ export class HotsockClient {
    * @public
    */
   suspend = () => {
+    this.#reconnecting = false
     this.#activeConnection?.close()
   }
 
@@ -423,17 +433,28 @@ export class HotsockClient {
    * Reconnect with backoff + jitter
    */
   reconnectWithBackoff = () => {
+    if (this.#reconnecting) return
+    this.#reconnecting = true
+
     const maxBackoffDelay = 20000 // 20 seconds
     let backoffDelay = 1000 // 1 second (initial)
 
     const connect = async () => {
+      if (!this.#reconnecting) return
+
       try {
         this.#activeConnection = new Connection(this)
         await this.#activeConnection.initializationComplete()
+        await this.#activeConnection.connectionOpen()
+
+        // Connection opened successfully
+        this.#reconnecting = false
 
         // Resubscribe to all channels
         this.#activeConnection.manageSubscriptions()
       } catch (error) {
+        if (!this.#reconnecting) return
+
         this.logger.warn("[hotsock] reconnect attempt failed:", error)
         setTimeout(() => {
           const jitter = Math.random() * 1000 // Add jitter up to 1 second
@@ -454,6 +475,7 @@ export class HotsockClient {
    * @public
    */
   terminate = () => {
+    this.#reconnecting = false
     if (this.#activeConnection) {
       this.#activeConnection.clearClientBindingsOnClose = true
       this.#activeConnection.close()
@@ -672,6 +694,21 @@ class Connection {
   #initializePromise
 
   /**
+   * A promise that resolves when the WebSocket connection is opened, or
+   * rejects if the connection closes or fails before opening.
+   *
+   * @type {Promise}
+   * @private
+   */
+  #openPromise
+
+  /** @private */
+  #resolveOpenPromise
+
+  /** @private */
+  #rejectOpenPromise
+
+  /**
    * @param {HotsockClient} client
    * @param {boolean} lazy
    */
@@ -682,6 +719,13 @@ class Connection {
     this.#connectionIdPromise = new Promise((resolve) => {
       this.#resolveConnectionIdPromise = resolve
     })
+
+    this.#openPromise = new Promise((resolve, reject) => {
+      this.#resolveOpenPromise = resolve
+      this.#rejectOpenPromise = reject
+    })
+    // Prevent unhandled rejection when connectionOpen() is not awaited
+    this.#openPromise.catch(() => {})
 
     if (this.#lazy) {
       this.#client.logger.debug(
@@ -709,9 +753,11 @@ class Connection {
     } catch (error) {
       if (this.#client.connectTokenErrorFn) {
         this.#client.connectTokenErrorFn(error)
+        this.#rejectOpenPromise(error)
         return
       }
 
+      this.#rejectOpenPromise(error)
       throw error
     }
 
@@ -740,6 +786,17 @@ class Connection {
    */
   initializationComplete = () => {
     return this.#initializePromise
+  }
+
+  /**
+   * Returns a promise that resolves when the WebSocket connection is opened,
+   * or rejects if the connection closes or fails before opening.
+   *
+   * @private
+   * @returns {Promise}
+   */
+  connectionOpen = () => {
+    return this.#openPromise
   }
 
   /**
@@ -811,6 +868,7 @@ class Connection {
    */
   onopen = (wsEvent) => {
     this.#client.logger.debug("[hotsock] connection successful")
+    this.#resolveOpenPromise()
 
     this.startSubscriptionManagementLoop()
 
@@ -829,6 +887,7 @@ class Connection {
     this.#client.logger.debug(
       `[hotsock] connection "${this.#connectionIdLogDescription}" disconnected`
     )
+    this.#rejectOpenPromise(new Error("connection closed"))
 
     this.channels = {}
     this.stopSubscribeLoop()
