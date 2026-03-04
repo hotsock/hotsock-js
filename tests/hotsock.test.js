@@ -69,7 +69,7 @@ describe("HotsockClient constructor", () => {
 
   test("should throw an error if connectTokenFn is not provided", () => {
     expect(() => new HotsockClient(wssBaseUrl)).toThrow(
-      "connectTokenFn must be a function"
+      "connectTokenFn must be a function",
     )
   })
 
@@ -112,7 +112,7 @@ describe("HotsockClient constructor", () => {
 
     expect(mockErrorFn).toHaveBeenCalled()
     expect(mockErrorFn.mock.calls[0][0].message).toBe(
-      "Failed to load a valid token after maximum attempts"
+      "Failed to load a valid token after maximum attempts",
     )
   })
 
@@ -253,7 +253,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "anything",
             channel: "does not matter",
-          })
+          }),
         )
         expect(cb).toHaveBeenCalled()
       })
@@ -309,7 +309,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "random-event",
             channel: "does-not-matter",
-          })
+          }),
         )
         expect(cb).toHaveBeenCalled()
       })
@@ -326,7 +326,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "wildcard.MATCHES.match.MATCHES",
             channel: "does-not-matter",
-          })
+          }),
         )
         expect(cb).toHaveBeenCalled()
       })
@@ -348,14 +348,14 @@ describe("public API", () => {
 
         expect(mockWebSocket.send).toHaveBeenCalledTimes(1)
         expect(mockWebSocket.send).toHaveBeenCalledWith(
-          '{"event":"hotsock.subscribe","channel":"my-channel"}'
+          '{"event":"hotsock.subscribe","channel":"my-channel"}',
         )
 
         mockWebSocket.receiveMessage(
           JSON.stringify({
             event: "my-event",
             channel: "some-other-channel",
-          })
+          }),
         )
         expect(cb).not.toHaveBeenCalled()
 
@@ -363,7 +363,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "my-event",
             channel: "my-channel",
-          })
+          }),
         )
         expect(cb).toHaveBeenCalled()
         expect(cbnotcalled).not.toHaveBeenCalled()
@@ -382,7 +382,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "wildcard.MATCHES.match.MATCHES",
             channel: "wildcard-channel",
-          })
+          }),
         )
         expect(cb).toHaveBeenCalled()
       })
@@ -401,7 +401,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "wildcard.NOMATCH.nomatch.NOMATCH",
             channel: "wildcard-channel-nomatch",
-          })
+          }),
         )
         expect(cb).not.toHaveBeenCalled()
       })
@@ -413,7 +413,7 @@ describe("public API", () => {
         const binding = hotsock.bind("turn-off-client-event", cb)
         binding.unbind()
         expect(
-          hotsock.clientEventBindings.get("turn-off-client-event")
+          hotsock.clientEventBindings.get("turn-off-client-event"),
         ).toStrictEqual(undefined)
       })
 
@@ -424,7 +424,7 @@ describe("public API", () => {
         })
         binding.unbind()
         expect(hotsock.channelEventBindings["turn-off-channel"]).toStrictEqual(
-          []
+          [],
         )
       })
     })
@@ -436,7 +436,7 @@ describe("public API", () => {
               event: "hotsock.connected",
               data: { connectionId: "QDpLKfv7IAMCJOw=" },
               meta: { uid: "123", umd: { name: "Dwight" } },
-            })
+            }),
           )
         })
         test("sets connectionId", () => {
@@ -457,32 +457,32 @@ describe("public API", () => {
               channel: "my-channel",
               data: {},
               meta: { uid: "456", umd: { name: "Jim" } },
-            })
+            }),
           )
         })
         test("sets channel state", () => {
           expect(hotsock.activeConnection.channels["my-channel"]["state"]).toBe(
-            "subscribeConfirmed"
+            "subscribeConfirmed",
           )
         })
         test("sets channel uid", () => {
           expect(hotsock.activeConnection.channels["my-channel"]["uid"]).toBe(
-            "456"
+            "456",
           )
         })
         test("sets channel umd", () => {
           expect(
-            hotsock.activeConnection.channels["my-channel"]["umd"]
+            hotsock.activeConnection.channels["my-channel"]["umd"],
           ).toStrictEqual({ name: "Jim" })
         })
         test("sets channel members", () => {
           expect(
-            hotsock.activeConnection.channels["my-channel"]["members"]
+            hotsock.activeConnection.channels["my-channel"]["members"],
           ).toStrictEqual([])
         })
         test("sets channel name", () => {
           expect(
-            hotsock.activeConnection.channels["my-channel"]["name"]
+            hotsock.activeConnection.channels["my-channel"]["name"],
           ).toStrictEqual("my-channel")
         })
       })
@@ -494,39 +494,39 @@ describe("public API", () => {
               channel: "my-channel",
               data: {},
               meta: { uid: "456", umd: { name: "Jim" } },
-            })
+            }),
           )
           mockWebSocket.receiveMessage(
             JSON.stringify({
               event: "hotsock.unsubscribed",
               channel: "my-channel",
               data: {},
-            })
+            }),
           )
         })
         test("sets channels state", () => {
           expect(hotsock.activeConnection.channels["my-channel"]["state"]).toBe(
-            "unsubscribeConfirmed"
+            "unsubscribeConfirmed",
           )
         })
         test("clears channels uid", () => {
           expect(hotsock.activeConnection.channels["my-channel"]["uid"]).toBe(
-            null
+            null,
           )
         })
         test("clears channels umd", () => {
           expect(hotsock.activeConnection.channels["my-channel"]["umd"]).toBe(
-            null
+            null,
           )
         })
         test("clears channels members", () => {
           expect(
-            hotsock.activeConnection.channels["my-channel"]["members"]
+            hotsock.activeConnection.channels["my-channel"]["members"],
           ).toStrictEqual([])
         })
         test("keeps channel name", () => {
           expect(
-            hotsock.activeConnection.channels["my-channel"]["name"]
+            hotsock.activeConnection.channels["my-channel"]["name"],
           ).toStrictEqual("my-channel")
         })
       })
@@ -536,10 +536,10 @@ describe("public API", () => {
             JSON.stringify({
               event: "hotsock.ping",
               data: {},
-            })
+            }),
           )
           expect(mockWebSocket.send).toHaveBeenCalledWith(
-            `{"event":"hotsock.pong"}`
+            `{"event":"hotsock.pong"}`,
           )
         })
       })
@@ -561,7 +561,7 @@ describe("public API", () => {
           JSON.stringify({
             event: event,
             channel: "does-not-matter",
-          })
+          }),
         )
         expect(messageFn1).not.toHaveBeenCalled()
         expect(messageFn2).not.toHaveBeenCalled()
@@ -579,7 +579,7 @@ describe("public API", () => {
           JSON.stringify({
             event,
             channel: "does-not-matter",
-          })
+          }),
         )
         expect(messageFn).not.toHaveBeenCalled()
       })
@@ -606,7 +606,7 @@ describe("public API", () => {
           JSON.stringify({
             event,
             channel: "off-channel",
-          })
+          }),
         )
         expect(messageFn1).not.toHaveBeenCalled()
         expect(messageFn2).toHaveBeenCalled()
@@ -618,10 +618,10 @@ describe("public API", () => {
 
         expect(mockWebSocket.send).toHaveBeenCalledTimes(2)
         expect(mockWebSocket.send).toHaveBeenCalledWith(
-          '{"event":"hotsock.subscribe","channel":"off-channel"}'
+          '{"event":"hotsock.subscribe","channel":"off-channel"}',
         )
         expect(mockWebSocket.send).toHaveBeenCalledWith(
-          '{"event":"hotsock.unsubscribe","channel":"off-channel"}'
+          '{"event":"hotsock.unsubscribe","channel":"off-channel"}',
         )
       })
     })
@@ -645,7 +645,7 @@ describe("public API", () => {
           JSON.stringify({
             event,
             channel: "off-channel",
-          })
+          }),
         )
         expect(messageFn1).not.toHaveBeenCalled()
         expect(messageFn2).not.toHaveBeenCalled()
@@ -675,7 +675,7 @@ describe("public API", () => {
       })
       expect(mockWebSocket.send).toHaveBeenCalledTimes(1)
       expect(mockWebSocket.send).toHaveBeenCalledWith(
-        '{"channel":"my-channel","event":"my-event","data":{"my":"data"}}'
+        '{"channel":"my-channel","event":"my-event","data":{"my":"data"}}',
       )
     })
   })
@@ -700,13 +700,13 @@ describe("public API", () => {
             channel: "auto-channel",
             data: { autoSubscribed: true },
             meta: { uid: "test-user", umd: { role: "viewer" } },
-          })
+          }),
         )
       })
 
       test("sets autoSubscribed to true", () => {
         expect(
-          hotsock.activeConnection.channels["auto-channel"].autoSubscribed
+          hotsock.activeConnection.channels["auto-channel"].autoSubscribed,
         ).toBe(true)
       })
 
@@ -722,7 +722,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "hotsock.unsubscribe",
             channel: "auto-channel",
-          })
+          }),
         )
       })
 
@@ -731,7 +731,7 @@ describe("public API", () => {
         hotsock.activeConnection.manageSubscriptions()
 
         expect(hotsock.activeConnection.channels["auto-channel"].state).toBe(
-          "subscribeConfirmed"
+          "subscribeConfirmed",
         )
       })
     })
@@ -745,13 +745,13 @@ describe("public API", () => {
             channel: "manual-channel",
             data: {},
             meta: { uid: "test-user", umd: { role: "viewer" } },
-          })
+          }),
         )
       })
 
       test("sets autoSubscribed to false", () => {
         expect(
-          hotsock.activeConnection.channels["manual-channel"].autoSubscribed
+          hotsock.activeConnection.channels["manual-channel"].autoSubscribed,
         ).toBe(false)
       })
 
@@ -767,7 +767,7 @@ describe("public API", () => {
           JSON.stringify({
             event: "hotsock.unsubscribe",
             channel: "manual-channel",
-          })
+          }),
         )
       })
     })
@@ -781,7 +781,7 @@ describe("public API", () => {
             channel: "auto-channel",
             data: { autoSubscribed: true },
             meta: { uid: "test-user", umd: null },
-          })
+          }),
         )
 
         // Manually subscribed channel
@@ -791,7 +791,7 @@ describe("public API", () => {
             channel: "manual-channel",
             data: {},
             meta: { uid: "test-user", umd: null },
-          })
+          }),
         )
       })
 
@@ -807,13 +807,13 @@ describe("public API", () => {
           JSON.stringify({
             event: "hotsock.unsubscribe",
             channel: "manual-channel",
-          })
+          }),
         )
         expect(mockWebSocket.send).not.toHaveBeenCalledWith(
           JSON.stringify({
             event: "hotsock.unsubscribe",
             channel: "auto-channel",
-          })
+          }),
         )
       })
 
@@ -821,10 +821,10 @@ describe("public API", () => {
         hotsock.activeConnection.manageSubscriptions()
 
         expect(hotsock.activeConnection.channels["auto-channel"].state).toBe(
-          "subscribeConfirmed"
+          "subscribeConfirmed",
         )
         expect(hotsock.activeConnection.channels["manual-channel"].state).toBe(
-          "unsubscribePending"
+          "unsubscribePending",
         )
       })
     })

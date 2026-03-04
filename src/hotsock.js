@@ -170,7 +170,7 @@ export class HotsockClient {
       lazyConnection = false,
       logger,
       logLevel = "warn",
-    } = {}
+    } = {},
   ) {
     if (!webSocketUrl || webSocketUrl === "") {
       throw new InvalidArgumentError("webSocketUrl must be provided")
@@ -354,7 +354,7 @@ export class HotsockClient {
         if (messageFn) {
           // Remove only the specific callback function
           const index = bindings.findIndex(
-            (binding) => binding.messageFn === messageFn
+            (binding) => binding.messageFn === messageFn,
           )
           if (index > -1) {
             bindings.splice(index, 1)
@@ -586,7 +586,7 @@ class Connection {
       this.#resolveConnectionIdPromise(value)
     }
     this.#client.logger.debug(
-      `[hotsock] connection id set to "${this.#connectionIdLogDescription}"`
+      `[hotsock] connection id set to "${this.#connectionIdLogDescription}"`,
     )
   }
 
@@ -729,7 +729,7 @@ class Connection {
 
     if (this.#lazy) {
       this.#client.logger.debug(
-        "[hotsock] lazy connect enabled, waiting for channel binding to establish connection"
+        "[hotsock] lazy connect enabled, waiting for channel binding to establish connection",
       )
       return
     }
@@ -748,7 +748,7 @@ class Connection {
     try {
       token = await this.loadTokenWithRetry(
         this.#client.connectTokenFn,
-        this.#client.connectTokenFnMaxAttempts
+        this.#client.connectTokenFnMaxAttempts,
       )
     } catch (error) {
       if (this.#client.connectTokenErrorFn) {
@@ -764,7 +764,7 @@ class Connection {
     this.#client.logger.debug(
       `[hotsock] connecting to "${
         this.#client.webSocketUrl
-      }" with token "${token}"`
+      }" with token "${token}"`,
     )
 
     this.#ws = new WebSocket(`${this.#client.webSocketUrl}?token=${token}`)
@@ -827,7 +827,7 @@ class Connection {
   sendMessage = (message) => {
     this.#client.logger.debug(
       `[hotsock] connection "${this.#connectionIdLogDescription}" send message`,
-      message
+      message,
     )
 
     this.#ws.send(message)
@@ -885,7 +885,7 @@ class Connection {
    */
   onclose = (wsEvent) => {
     this.#client.logger.debug(
-      `[hotsock] connection "${this.#connectionIdLogDescription}" disconnected`
+      `[hotsock] connection "${this.#connectionIdLogDescription}" disconnected`,
     )
     this.#rejectOpenPromise(new Error("connection closed"))
 
@@ -917,7 +917,7 @@ class Connection {
       `[hotsock] connection "${
         this.#connectionIdLogDescription
       }" received message`,
-      wsEvent.data
+      wsEvent.data,
     )
 
     const clientBindings =
@@ -1087,14 +1087,14 @@ class Connection {
           !unsubscribedChannels.includes(channel)
         ) {
           const bindingWithSubscribeFn = bindings.find(
-            (binding) => typeof binding.subscribeTokenFn === "function"
+            (binding) => typeof binding.subscribeTokenFn === "function",
           )
           const subscribeTokenFn = bindingWithSubscribeFn
             ? bindingWithSubscribeFn.subscribeTokenFn
             : undefined
           this.subscribe(channel, { subscribeTokenFn })
         }
-      }
+      },
     )
   }
 
@@ -1112,7 +1112,7 @@ class Connection {
    */
   subscribe = async (
     channel,
-    { subscribeTokenFn, subscribeTokenMaxAttempts = 2 } = {}
+    { subscribeTokenFn, subscribeTokenMaxAttempts = 2 } = {},
   ) => {
     this.#client.logger.debug(`[hotsock] subscribing to "${channel}"`)
     this.channels[channel] ||= new ConnectionChannel(channel)
@@ -1126,13 +1126,13 @@ class Connection {
       try {
         const token = await this.loadTokenWithRetry(
           () => subscribeTokenFn({ channel, connectionId }),
-          subscribeTokenMaxAttempts
+          subscribeTokenMaxAttempts,
         )
         data = { token }
       } catch (error) {
         this.#client.logger.error(
           "[hotsock] failed to load subscribe token:",
-          error
+          error,
         )
         this.channels[channel].state = "subscribeFailed"
         return
@@ -1141,7 +1141,7 @@ class Connection {
 
     try {
       this.sendMessage(
-        JSON.stringify({ event: "hotsock.subscribe", channel, data })
+        JSON.stringify({ event: "hotsock.subscribe", channel, data }),
       )
     } catch (err) {
       this.channels[channel].state = "subscribeFailed"
@@ -1204,7 +1204,7 @@ class Connection {
   payloadFromJwtSegment = (segmentBase64) => {
     try {
       return JSON.parse(
-        this.decodeBase64(segmentBase64.replace(/-/g, "+").replace(/_/g, "/"))
+        this.decodeBase64(segmentBase64.replace(/-/g, "+").replace(/_/g, "/")),
       )
     } catch (_) {
       throw new Error(`Invalid JWT segment ${segmentBase64}`)
@@ -1225,11 +1225,11 @@ class Connection {
 
         if (!this.looksLikeJwt(token)) {
           throw new Error(
-            "Invalid token format: token returned by function must be a valid JWT string"
+            "Invalid token format: token returned by function must be a valid JWT string",
           )
         } else if (this.isJwtExpired(token)) {
           throw new Error(
-            "Invalid token: token returned by function is expired"
+            "Invalid token: token returned by function is expired",
           )
         } else {
           return token
@@ -1237,7 +1237,7 @@ class Connection {
       } catch (error) {
         this.#client.logger.warn(
           `[hotsock] attempt ${attempts + 1} to get token failed:`,
-          error
+          error,
         )
       }
 
@@ -1438,7 +1438,7 @@ class Binding {
   constructor(
     client,
     event,
-    { channel, unbindFn, messageFn, subscribeTokenFn }
+    { channel, unbindFn, messageFn, subscribeTokenFn },
   ) {
     this.#client = client
     this.#channel = channel
