@@ -883,6 +883,238 @@ describe("public API", () => {
       )
     })
   })
+
+  describe("channel alias support", () => {
+    test("hotsock.subscribed with channelAlias sets up alias mapping and clears stale alias entry", () => {
+      const cb = jest.fn()
+      hotsock.bind("my-event", cb, { channel: "foo" })
+
+      // Library subscribes to "foo"
+      expect(mockWebSocket.send).toHaveBeenCalledWith(
+        JSON.stringify({ event: "hotsock.subscribe", channel: "foo" }),
+      )
+      expect(hotsock.activeConnection.channels["foo"].state).toBe(
+        "subscribePending",
+      )
+
+      // Server responds with the real channel name and alias
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: {},
+          meta: { uid: "james", umd: null, channelAlias: "foo" },
+        }),
+      )
+
+      // Real channel is tracked
+      expect(hotsock.activeConnection.channels["foo.123"].state).toBe(
+        "subscribeConfirmed",
+      )
+      expect(hotsock.activeConnection.channels["foo.123"].uid).toBe("james")
+
+      // Stale alias entry is removed
+      expect(hotsock.activeConnection.channels["foo"]).toBeUndefined()
+
+      // Alias maps are recorded
+      expect(hotsock.activeConnection.channelAliasToReal["foo"]).toBe("foo.123")
+      expect(hotsock.activeConnection.channelRealToAlias["foo.123"]).toBe("foo")
+    })
+
+    test("events on real channel are dispatched to alias bindings", () => {
+      const cb = jest.fn()
+      hotsock.bind("my-event", cb, { channel: "foo" })
+
+      // Establish alias mapping
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: {},
+          meta: { uid: "james", umd: null, channelAlias: "foo" },
+        }),
+      )
+
+      // Server sends an event on the real channel
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "my-event",
+          channel: "foo.123",
+          data: { hello: "world" },
+        }),
+      )
+
+      expect(cb).toHaveBeenCalledTimes(1)
+      expect(cb).toHaveBeenCalledWith({
+        event: "my-event",
+        channel: "foo.123",
+        data: { hello: "world" },
+      })
+    })
+
+    test("regex bindings on alias match events on real channel", () => {
+      const cb = jest.fn()
+      hotsock.bind(/my-.*/, cb, { channel: "foo" })
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: {},
+          meta: { uid: "james", umd: null, channelAlias: "foo" },
+        }),
+      )
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "my-event",
+          channel: "foo.123",
+          data: {},
+        }),
+      )
+
+      expect(cb).toHaveBeenCalledTimes(1)
+    })
+
+    test("manageSubscriptions does not unsubscribe aliased real channel when alias has bindings", () => {
+      const cb = jest.fn()
+      hotsock.bind("my-event", cb, { channel: "foo" })
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: {},
+          meta: { uid: "james", umd: null, channelAlias: "foo" },
+        }),
+      )
+
+      mockWebSocket.send.mockClear()
+      hotsock.activeConnection.manageSubscriptions()
+
+      // Should NOT unsubscribe from foo.123
+      expect(mockWebSocket.send).not.toHaveBeenCalledWith(
+        JSON.stringify({ event: "hotsock.unsubscribe", channel: "foo.123" }),
+      )
+      // Should NOT re-subscribe to foo
+      expect(mockWebSocket.send).not.toHaveBeenCalledWith(
+        JSON.stringify({ event: "hotsock.subscribe", channel: "foo" }),
+      )
+    })
+
+    test("manageSubscriptions does not re-subscribe alias when real channel is already subscribed", () => {
+      const cb = jest.fn()
+      hotsock.bind("my-event", cb, { channel: "foo" })
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: {},
+          meta: { uid: "james", umd: null, channelAlias: "foo" },
+        }),
+      )
+
+      // Clear and run again — should not send any subscribe/unsubscribe
+      mockWebSocket.send.mockClear()
+      hotsock.activeConnection.manageSubscriptions()
+      hotsock.activeConnection.manageSubscriptions()
+      hotsock.activeConnection.manageSubscriptions()
+
+      expect(mockWebSocket.send).not.toHaveBeenCalled()
+    })
+
+    test("unbinding all alias bindings triggers unsubscribe of real channel", () => {
+      const cb = jest.fn()
+      hotsock.bind("my-event", cb, { channel: "foo" })
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: {},
+          meta: { uid: "james", umd: null, channelAlias: "foo" },
+        }),
+      )
+
+      mockWebSocket.send.mockClear()
+      hotsock.unbind("my-event", { messageFn: cb, channel: "foo" })
+
+      expect(mockWebSocket.send).toHaveBeenCalledWith(
+        JSON.stringify({ event: "hotsock.unsubscribe", channel: "foo.123" }),
+      )
+    })
+
+    test("Binding.channel getter returns real ConnectionChannel for alias binding", () => {
+      const cb = jest.fn()
+      const binding = hotsock.bind("my-event", cb, { channel: "foo" })
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: {},
+          meta: { uid: "james", umd: { role: "admin" }, channelAlias: "foo" },
+        }),
+      )
+
+      expect(binding.channel).toBeDefined()
+      expect(binding.channel.name).toBe("foo.123")
+      expect(binding.channel.state).toBe("subscribeConfirmed")
+      expect(binding.channel.uid).toBe("james")
+      expect(binding.channel.umd).toStrictEqual({ role: "admin" })
+    })
+
+    test("Channel class accessors work with alias", () => {
+      const channel = hotsock.channels("foo")
+      const cb = jest.fn()
+      channel.bind("my-event", cb)
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "foo.123",
+          data: { members: [{ uid: "james" }] },
+          meta: { uid: "james", umd: { role: "admin" }, channelAlias: "foo" },
+        }),
+      )
+
+      expect(channel.uid).toBe("james")
+      expect(channel.umd).toStrictEqual({ role: "admin" })
+      expect(channel.members).toStrictEqual([{ uid: "james" }])
+    })
+
+    test("hotsock.subscribed without channelAlias works as before", () => {
+      const cb = jest.fn()
+      hotsock.bind("my-event", cb, { channel: "normal-channel" })
+
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.subscribed",
+          channel: "normal-channel",
+          data: {},
+          meta: { uid: "456", umd: null },
+        }),
+      )
+
+      expect(
+        hotsock.activeConnection.channels["normal-channel"].state,
+      ).toBe("subscribeConfirmed")
+      expect(
+        hotsock.activeConnection.channelAliasToReal["normal-channel"],
+      ).toBeUndefined()
+
+      // Events still dispatch normally
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "my-event",
+          channel: "normal-channel",
+          data: {},
+        }),
+      )
+      expect(cb).toHaveBeenCalledTimes(1)
+    })
+  })
 })
 
 describe("connected message timeout", () => {
