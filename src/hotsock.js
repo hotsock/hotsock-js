@@ -45,6 +45,9 @@ export class HotsockClient {
   /**
    * The maximum number of times to call the `connectTokenFn` when trying to
    * obtain a connection JWT.
+   *
+   * @readonly
+   * @returns {number}
    */
   get connectTokenFnMaxAttempts() {
     return this.#connectTokenFnMaxAttempts
@@ -57,6 +60,9 @@ export class HotsockClient {
    * A function that is called after retries on the `connectTokenFn` have been
    * reached and no further attempts to load it will be made. If not supplied,
    * the error is thrown.
+   *
+   * @readonly
+   * @returns {LoadTokenErrorFn}
    */
   get connectTokenErrorFn() {
     return this.#connectTokenErrorFn
@@ -145,10 +151,10 @@ export class HotsockClient {
    * attempt loading the connect JWT by calling `connectTokenFn`. Defaults to
    * 2. Each attempt has a backoff wait that is 500ms longer than the previous
    * attempt.
-   * @param {function} [options.connectTokenErrorFn] A function that is called
-   * after retries on the `connectTokenFn` have been reached and no further
-   * attempts to load it will be made. If this callback function is not
-   * supplied, the error is thrown.
+   * @param {LoadTokenErrorFn} [options.connectTokenErrorFn] A function that
+   * is called after retries on the `connectTokenFn` have been reached and no
+   * further attempts to load it will be made. If this callback function is
+   * not supplied, the error is thrown.
    * @param {boolean} [options.lazyConnection] If true, a connection will not
    * attempt to be established until there's an attempt to subscribe to a
    * channel. This is particularly useful when you use a single global
@@ -267,15 +273,15 @@ export class HotsockClient {
    * a matching event is received. This function must take one argument - an
    * Object containing the message received.
    * @param {object} options
-   * @param {string} [options.channel] The name of the channel to subscribe
-   * to. `messageFn` will also be bound to both this channel name and
-   * `event`. Specifying a channel name will automatically handle
-   * subscribing to the channel if it's not already subscribed.
+   * @param {string} [options.channel] The name of the channel to subscribe to.
+   * `messageFn` will also be bound to both this channel name and `event`.
+   * Specifying a channel name will automatically handle subscribing to the
+   * channel if it's not already subscribed.
    * @param {LoadTokenFn} [options.subscribeTokenFn] A function that returns a
-   * JWT that authorizes subscribing to this channel. This function
-   * may be called multiple times - once for the initial subscribe and again
-   * ahead of any re-subscribe attempts. `subscribeTokenFn` is optional since
-   * the connect token often grants channel subscription permission.
+   * JWT that authorizes subscribing to this channel. This function may be
+   * called multiple times - once for the initial subscribe and again ahead
+   * of any re-subscribe attempts. `subscribeTokenFn` is optional since the
+   * connect token often grants channel subscription permission.
    * @returns {Binding} The bound event object.
    */
   bind = (event, messageFn, { channel, subscribeTokenFn } = {}) => {
@@ -324,8 +330,8 @@ export class HotsockClient {
    * @param {function} [options.messageFn] The specific function to remove as a
    * callback. If no function is supplied or it's null, all messageFn callbacks
    * for the supplied channel and event will be removed.
-   * @param {string} [options.channel] The name of the channel to
-   * unsubscribe from.
+   * @param {string} [options.channel] The name of the channel to unsubscribe
+   * from.
    * @returns {void}
    */
   unbind = (event, { messageFn, channel } = {}) => {
@@ -386,14 +392,14 @@ export class HotsockClient {
   channels = (channel) => new Channel(this, channel)
 
   /**
-   * Send a message to the WebSocket on the specified channel. The
-   * connection or channel subscription must be be pre-authorized with
-   * "publish" access for this to succeed.
+   * Send a message to the WebSocket on the specified channel. The connection
+   * or channel subscription must be be pre-authorized with "publish" access
+   * for this to succeed.
    *
    * @public
    * @param {string} event The name of the event to send.
    * @param {object} options
-   * @param {string=} [options.channel] The name of the channel to send the
+   * @param {string} [options.channel] The name of the channel to send the
    * message to.
    * @param {JsonSerializable} [options.data] The message data.
    * @returns {void}
@@ -704,8 +710,8 @@ class Connection {
   #initializePromise
 
   /**
-   * A promise that resolves when the WebSocket connection is opened, or
-   * rejects if the connection closes or fails before opening.
+   * A promise that resolves when the WebSocket connection is opened, or rejects
+   * if the connection closes or fails before opening.
    *
    * @type {Promise}
    * @private
@@ -788,8 +794,8 @@ class Connection {
    * Allows awaiting the connection initialize call. Does not await the actual
    * WebSocket connection being opened, but any errors with the WebSocket
    * connection could be handled in `onerror`. This is typically useful when
-   * you want to catch token loading errors gracefully after the maximum
-   * number of attempts using async/await.
+   * you want to catch token loading errors gracefully after the maximum number
+   * of attempts using async/await.
    *
    * @private
    * @returns {Promise}
@@ -828,7 +834,7 @@ class Connection {
    * notify any subscribers of the `@@messageSent` event with the raw message.
    *
    * The call to the WebSocket send() can throw an error if unsuccessful, which
-   * prevents client bindings on "@@messagesSent" from being published if it
+   * prevents client bindings on "@@messageSent" from being published if it
    * isn't actually sent.
    *
    * @private
@@ -903,7 +909,7 @@ class Connection {
    * Called when the WebSocket connection is closed.
    *
    * @private
-   * @param {Event} wsEvent
+   * @param {CloseEvent} wsEvent
    */
   onclose = (wsEvent) => {
     clearTimeout(this.#connectedTimeoutId)
@@ -934,7 +940,7 @@ class Connection {
    * Called whenever any message is received on the WebSocket connection.
    *
    * @private
-   * @param {Event} wsEvent
+   * @param {MessageEvent} wsEvent
    */
   onmessage = (wsEvent) => {
     this.#client.logger.debug(
@@ -1282,16 +1288,21 @@ class Connection {
  * bindings on a channel, but there will only ever be one of these per channel
  * on a connection.
  *
- * - `members`: The list of members who are currently in the channel (only populated for presence channels)
- * - `state`: Describes the subscription state with the following possible values:
- *   - 'subscribePending': The subscription request has been sent to the server, and the client is awaiting confirmation.
- *   - 'subscribeConfirmed': The server has confirmed the subscription, and the channel is actively subscribed.
+ * - `members`: The list of members who are currently in the channel
+ *   (only populated for presence channels)
+ * - `state`: Describes the subscription state with the following possible
+ *   values:
+ *   - 'subscribePending': The subscription request has been sent to the
+ *     server, and the client is awaiting confirmation.
+ *   - 'subscribeConfirmed': The server has confirmed the subscription,
+ *     and the channel is actively subscribed.
  *   - 'subscribeFailed': The subscription process has encountered a failure.
  *   - 'unsubscribePending': Awaiting server confirmation for unsubscription.
  *   - 'unsubscribeConfirmed': The server has confirmed the unsubscription.
  *   - 'unsubscribeFailed': The unsubscription process has failed.
  * - `uid`: A unique identifier for the user (string or undefined).
- * - `umd`: User metadata which can be any value representable in JSON (object, array, string, number, boolean, or null).
+ * - `umd`: User metadata which can be any value representable in JSON
+ *   (object, array, string, number, boolean, or null).
  *
  * @class
  * @constructor
@@ -1306,7 +1317,9 @@ class ConnectionChannel {
 
   /**
    * @package
-   * @type {'subscribePending' | 'subscribeConfirmed' | 'subscribeFailed' | 'unsubscribePending' | 'unsubscribeConfirmed' | 'unsubscribeFailed' | undefined}
+   * @type {'subscribePending' | 'subscribeConfirmed' | 'subscribeFailed'
+   * | 'unsubscribePending' | 'unsubscribeConfirmed' | 'unsubscribeFailed'
+   * | undefined}
    * */
   state
 
@@ -1415,6 +1428,7 @@ class Channel {
    * and if `uid` has a value.
    *
    * @public
+   * @returns {string=}
    */
   get uid() {
     return this.#connectionChannel?.uid
@@ -1425,17 +1439,23 @@ class Channel {
    * subscribed and if `umd` has a value.
    *
    * @public
+   * @returns {JsonSerializable}
    */
   get umd() {
     return this.#connectionChannel?.umd
   }
 
-  /** Members in this channel. @public */
+  /**
+   * Members in this channel.
+   *
+   * @public
+   * @returns {Array}
+   */
   get members() {
     return this.#connectionChannel?.members || []
   }
 
-  /** @private @returns {ConnectionChannel} */
+  /** @private @returns {ConnectionChannel=} */
   get #connectionChannel() {
     return this.#client?.activeConnection?.channels?.[this.#name]
   }
@@ -1453,13 +1473,14 @@ class Binding {
    * @param {HotsockClient} client The parent Hotsock client
    * @param {string | RegExp} event The name of the event to bind
    * @param {Object} options
-   * @param {string=} options.channel The name of the channel to bind
-   * @param {function} options.unbindFn The function that can be called to remove
-   * the event binding.
-   * @param {MessageHandlerFn} options.messageFn The the function bound to be called
-   * with a message.
-   * @param {LoadTokenFn} options.subscribeTokenFn The token function to be called
-   * to authorize the channel subscription when binding/rebinding.
+   * @param {string} [options.channel] The name of the channel to bind
+   * @param {function} options.unbindFn The function that can be called to
+   * remove the event binding.
+   * @param {MessageHandlerFn} options.messageFn The function bound to be
+   * called with a message.
+   * @param {LoadTokenFn} [options.subscribeTokenFn] The token function
+   * to be called to authorize the channel subscription when
+   * binding/rebinding.
    */
   constructor(
     client,
@@ -1515,7 +1536,7 @@ class Binding {
 
   /**
    * @public
-   * @returns {string} The bound event
+   * @returns {string | RegExp} The bound event
    */
   get event() {
     return this.#event
@@ -1550,11 +1571,12 @@ class Binding {
 
 /**
  * A function that returns a signed JWT that is authorized to connect to the
- * WebSocket or authorized to subscribe to channels. It takes an object as an
- * argument. The function can return the JWT string directly or a promise that
- * resolves to the JWT string.
+ * WebSocket or authorized to subscribe to channels. Subscribe token functions
+ * receive an object argument with channel and connection details. Connect token
+ * functions receive no arguments. The function can return the JWT string
+ * directly or a promise that resolves to the JWT string.
  *
- * @typedef {function(LoadTokenFnParams): string | Promise<string>} LoadTokenFn
+ * @typedef {function(LoadTokenFnParams=): string | Promise<string>} LoadTokenFn
  */
 
 /**
@@ -1565,8 +1587,8 @@ class Binding {
  */
 
 /**
- * A function type for handling messages. This function takes a message
- * as an argument and does not return anything.
+ * A function type for handling messages. This function takes a message as
+ * an argument and does not return anything.
  *
  * @typedef {function(Object): void} MessageHandlerFn
  */
