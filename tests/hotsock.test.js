@@ -840,6 +840,49 @@ describe("public API", () => {
       })
     })
   })
+
+  describe("failed subscription retry", () => {
+    test("unbind and re-bind sends subscribe after a prior subscribeFailed", () => {
+      const cb = jest.fn()
+      hotsock.bind("my-event", cb, { channel: "restricted-channel" })
+
+      // Initial subscribe should have been sent
+      expect(mockWebSocket.send).toHaveBeenCalledWith(
+        JSON.stringify({
+          event: "hotsock.subscribe",
+          channel: "restricted-channel",
+        }),
+      )
+
+      // Server responds with permission denied error
+      mockWebSocket.receiveMessage(
+        JSON.stringify({
+          event: "hotsock.error",
+          channel: "restricted-channel",
+          error: { code: "SUBSCRIBE_PERMISSION_DENIED" },
+        }),
+      )
+
+      expect(
+        hotsock.activeConnection.channels["restricted-channel"].state,
+      ).toBe("subscribeFailed")
+
+      // Unbind the failed binding
+      hotsock.unbind("my-event", cb, { channel: "restricted-channel" })
+      mockWebSocket.send.mockClear()
+
+      // Re-bind to the same channel — bind() calls manageSubscriptions()
+      // internally, which should not skip the channel due to subscribeFailed
+      hotsock.bind("my-event", cb, { channel: "restricted-channel" })
+
+      expect(mockWebSocket.send).toHaveBeenCalledWith(
+        JSON.stringify({
+          event: "hotsock.subscribe",
+          channel: "restricted-channel",
+        }),
+      )
+    })
+  })
 })
 
 describe("connected message timeout", () => {
