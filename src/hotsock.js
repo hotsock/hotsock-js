@@ -302,6 +302,15 @@ export class HotsockClient {
       this.#channelEventBindings[channel] ||= []
       this.#channelEventBindings[channel].push(binding)
 
+      // Reset subscribeFailed state so manageSubscriptions() will re-attempt.
+      // This allows callers to retry a failed subscription by calling bind()
+      // again, potentially with a different subscribeTokenFn.
+      if (
+        this.#activeConnection.channels[channel]?.state === "subscribeFailed"
+      ) {
+        this.#activeConnection.channels[channel].state = undefined
+      }
+
       this.#activeConnection.manageSubscriptions()
 
       return binding
