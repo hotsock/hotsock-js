@@ -1571,10 +1571,9 @@ class Binding {
 
 /**
  * A function that returns a signed JWT that is authorized to connect to the
- * WebSocket or authorized to subscribe to channels. Subscribe token functions
- * receive an object argument with channel and connection details. Connect token
- * functions receive no arguments. The function can return the JWT string
- * directly or a promise that resolves to the JWT string.
+ * WebSocket or authorized to subscribe to channels. It takes an optional
+ * object as an argument. The function can return the JWT string directly or
+ * a promise that resolves to the JWT string.
  *
  * @typedef {function(LoadTokenFnParams=): string | Promise<string>} LoadTokenFn
  */
