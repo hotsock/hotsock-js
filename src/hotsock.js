@@ -672,6 +672,21 @@ class Connection {
   channels = {}
 
   /**
+   * Maps channel aliases to their real (server-resolved) channel names.
+   * Populated when hotsock.subscribed includes a channelAlias in meta.
+   *
+   * @type {Object.<string, string>}
+   */
+  channelAliasToReal = {}
+
+  /**
+   * Maps real channel names back to their aliases.
+   *
+   * @type {Object.<string, string>}
+   */
+  channelRealToAlias = {}
+
+  /**
    * The underlying WebSocket object for this connection (read-only).
    *
    * @readonly
@@ -929,6 +944,8 @@ class Connection {
     this.#rejectOpenPromise(new Error("connection closed"))
 
     this.channels = {}
+    this.channelAliasToReal = {}
+    this.channelRealToAlias = {}
     this.stopSubscribeLoop()
 
     const clientBindings =
@@ -985,6 +1002,12 @@ class Connection {
         this.channels[channel].members = data.members || []
         this.channels[channel].state = "subscribeConfirmed"
         this.channels[channel].autoSubscribed = data.autoSubscribed === true
+        if (message.meta.channelAlias) {
+          const alias = message.meta.channelAlias
+          this.channelAliasToReal[alias] = channel
+          this.channelRealToAlias[channel] = alias
+          delete this.channels[alias]
+        }
         break
       case "hotsock.unsubscribed":
         this.channels[channel] ||= new ConnectionChannel(channel)
@@ -1039,7 +1062,11 @@ class Connection {
       }
     })
 
-    const channelBindings = this.#client.channelEventBindings[channel] || []
+    const alias = this.channelRealToAlias[channel]
+    const channelBindings = [
+      ...(this.#client.channelEventBindings[channel] || []),
+      ...(alias ? this.#client.channelEventBindings[alias] || [] : []),
+    ]
     channelBindings.forEach((binding) => {
       if (binding.event instanceof RegExp) {
         if (binding.event.test(event)) {
@@ -1102,8 +1129,14 @@ class Connection {
     const unsubscribeableStates = ["subscribeConfirmed", "subscribePending"]
     let unsubscribedChannels = []
     Object.keys(this.channels).forEach((channel) => {
+      const alias = this.channelRealToAlias[channel]
+      const bindingCount =
+        (this.#client.channelEventBindings[channel] || []).length +
+        (alias
+          ? (this.#client.channelEventBindings[alias] || []).length
+          : 0)
       if (
-        (this.#client.channelEventBindings[channel] || []).length === 0 &&
+        bindingCount === 0 &&
         unsubscribeableStates.includes(this.channels[channel]?.state) &&
         !this.channels[channel]?.autoSubscribed
       ) {
@@ -1121,11 +1154,15 @@ class Connection {
     ]
     Object.entries(this.#client.channelEventBindings).forEach(
       ([channel, bindings]) => {
-        const state = this.channels[channel]?.state
+        const realChannel = this.channelAliasToReal[channel]
+        const state =
+          this.channels[channel]?.state ??
+          (realChannel ? this.channels[realChannel]?.state : undefined)
         if (
           bindings.length !== 0 &&
           subscribeableStates.includes(state) &&
-          !unsubscribedChannels.includes(channel)
+          !unsubscribedChannels.includes(channel) &&
+          !(realChannel && unsubscribedChannels.includes(realChannel))
         ) {
           const bindingWithSubscribeFn = bindings.find(
             (binding) => typeof binding.subscribeTokenFn === "function",
@@ -1466,7 +1503,9 @@ class Channel {
 
   /** @private @returns {ConnectionChannel=} */
   get #connectionChannel() {
-    return this.#client?.activeConnection?.channels?.[this.#name]
+    const conn = this.#client?.activeConnection
+    const realChannel = conn?.channelAliasToReal?.[this.#name]
+    return conn?.channels?.[realChannel || this.#name]
   }
 }
 
@@ -1540,7 +1579,9 @@ class Binding {
     if (!this.#channel) {
       return
     }
-    return this.#client.activeConnection.channels[this.#channel]
+    const conn = this.#client.activeConnection
+    const realChannel = conn?.channelAliasToReal?.[this.#channel]
+    return conn?.channels?.[realChannel || this.#channel]
   }
 
   /**
