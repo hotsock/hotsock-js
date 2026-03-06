@@ -1,8 +1,9 @@
 {
   "name": "@hotsock/hotsock-js",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "JavaScript library for Hotsock WebSocket connections, subscriptions, and messages",
   "main": "dist/hotsock.umd.js",
+  "module": "dist/hotsock.esm.js",
   "files": [
     "dist"
   ],
