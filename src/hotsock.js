@@ -491,10 +491,8 @@ export class HotsockClient {
    */
   terminate = () => {
     this.#reconnecting = false
-    if (this.#activeConnection) {
-      this.#activeConnection.clearClientBindingsOnClose = true
-      this.#activeConnection.close()
-    }
+    this.#activeConnection.clearClientBindingsOnClose = true
+    this.#activeConnection.close()
   }
 
   /**
@@ -597,9 +595,7 @@ class Connection {
    */
   #setConnectionId(value) {
     this.#connectionId = value
-    if (this.#resolveConnectionIdPromise) {
-      this.#resolveConnectionIdPromise(value)
-    }
+    this.#resolveConnectionIdPromise(value)
     this.#client.logger.debug(
       `[hotsock] connection id set to "${this.#connectionIdLogDescription}"`,
     )
