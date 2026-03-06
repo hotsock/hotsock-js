@@ -718,6 +718,16 @@ class Connection {
   #autoReconnect = true
 
   /**
+   * Set to true when close() is called. Checked in onopen to avoid creating
+   * orphaned timers when the async WebSocket open event fires after the
+   * connection has already been intentionally closed.
+   *
+   * @type {boolean}
+   * @private
+   */
+  #closed = false
+
+  /**
    * Timeout ID for the connected message timeout. If the hotsock.connected
    * message is not received within 5 seconds of the WebSocket opening, the
    * connection is closed and reconnection is attempted.
@@ -883,6 +893,7 @@ class Connection {
    * @private
    */
   close() {
+    this.#closed = true
     clearTimeout(this.#connectedTimeoutId)
 
     this.#autoReconnect = false
@@ -919,14 +930,17 @@ class Connection {
     clientBindings.forEach(({ messageFn }) => messageFn(wsEvent))
 
     // If hotsock.connected isn't received within 5s, close and reconnect.
-    this.#connectedTimeoutId = setTimeout(() => {
-      if (this.#connectionId === undefined) {
-        this.#client.logger.warn(
-          "[hotsock] did not receive hotsock.connected within timeout, reconnecting",
-        )
-        this.#ws?.close()
-      }
-    }, 5000)
+    // Skip if close() was already called to avoid leaving an orphaned timer.
+    if (!this.#closed) {
+      this.#connectedTimeoutId = setTimeout(() => {
+        if (this.#connectionId === undefined) {
+          this.#client.logger.warn(
+            "[hotsock] did not receive hotsock.connected within timeout, reconnecting",
+          )
+          this.#ws?.close()
+        }
+      }, 5000)
+    }
   }
 
   /**
