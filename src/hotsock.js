@@ -491,10 +491,8 @@ export class HotsockClient {
    */
   terminate = () => {
     this.#reconnecting = false
-    if (this.#activeConnection) {
-      this.#activeConnection.clearClientBindingsOnClose = true
-      this.#activeConnection.close()
-    }
+    this.#activeConnection.clearClientBindingsOnClose = true
+    this.#activeConnection.close()
   }
 
   /**
@@ -597,9 +595,7 @@ class Connection {
    */
   #setConnectionId(value) {
     this.#connectionId = value
-    if (this.#resolveConnectionIdPromise) {
-      this.#resolveConnectionIdPromise(value)
-    }
+    this.#resolveConnectionIdPromise(value)
     this.#client.logger.debug(
       `[hotsock] connection id set to "${this.#connectionIdLogDescription}"`,
     )
@@ -1146,9 +1142,7 @@ class Connection {
       const alias = this.channelRealToAlias[channel]
       const bindingCount =
         (this.#client.channelEventBindings[channel] || []).length +
-        (alias
-          ? (this.#client.channelEventBindings[alias] || []).length
-          : 0)
+        (alias ? (this.#client.channelEventBindings[alias] || []).length : 0)
       if (
         bindingCount === 0 &&
         unsubscribeableStates.includes(this.channels[channel]?.state) &&
