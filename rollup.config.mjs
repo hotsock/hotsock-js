@@ -14,5 +14,14 @@ export default {
       name: "Hotsock",
       plugins: [terser()],
     },
+    {
+      file: "dist/hotsock.esm.js",
+      format: "es",
+    },
+    {
+      file: "dist/hotsock.esm.min.js",
+      format: "es",
+      plugins: [terser()],
+    },
   ],
 }
