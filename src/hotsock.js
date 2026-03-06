@@ -1142,9 +1142,7 @@ class Connection {
       const alias = this.channelRealToAlias[channel]
       const bindingCount =
         (this.#client.channelEventBindings[channel] || []).length +
-        (alias
-          ? (this.#client.channelEventBindings[alias] || []).length
-          : 0)
+        (alias ? (this.#client.channelEventBindings[alias] || []).length : 0)
       if (
         bindingCount === 0 &&
         unsubscribeableStates.includes(this.channels[channel]?.state) &&

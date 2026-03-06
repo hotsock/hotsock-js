@@ -76,33 +76,49 @@ describe("HotsockClient constructor", () => {
   })
 
   test("should throw an error if connectTokenFn returns something that does not resemble a token", async () => {
-    await expect(async () => {
-      const hotsock = new HotsockClient(wssBaseUrl, {
-        connectTokenFn: () => testMalformedToken,
-      })
-      await hotsock.activeConnection.initializationComplete()
-    }).rejects.toThrow("Failed to load a valid token after maximum attempts")
+    jest.useFakeTimers()
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testMalformedToken,
+    })
+    const promise = hotsock.activeConnection.initializationComplete()
+    promise.catch(() => {}) // prevent unhandled rejection during timer advance
+    await jest.advanceTimersByTimeAsync(1000)
+    await expect(promise).rejects.toThrow(
+      "Failed to load a valid token after maximum attempts",
+    )
+    jest.useRealTimers()
   })
 
   test("should throw an error if connectTokenFn returns a token that isn't a parseable JWT", async () => {
-    await expect(async () => {
-      const hotsock = new HotsockClient(wssBaseUrl, {
-        connectTokenFn: () => testNotActuallyAToken,
-      })
-      await hotsock.activeConnection.initializationComplete()
-    }).rejects.toThrow("Failed to load a valid token after maximum attempts")
+    jest.useFakeTimers()
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testNotActuallyAToken,
+    })
+    const promise = hotsock.activeConnection.initializationComplete()
+    promise.catch(() => {}) // prevent unhandled rejection during timer advance
+    await jest.advanceTimersByTimeAsync(1000)
+    await expect(promise).rejects.toThrow(
+      "Failed to load a valid token after maximum attempts",
+    )
+    jest.useRealTimers()
   })
 
   test("should throw an error if connectTokenFn returns an expired token", async () => {
-    await expect(async () => {
-      const hotsock = new HotsockClient(wssBaseUrl, {
-        connectTokenFn: () => testExpiredToken,
-      })
-      await hotsock.activeConnection.initializationComplete()
-    }).rejects.toThrow("Failed to load a valid token after maximum attempts")
+    jest.useFakeTimers()
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testExpiredToken,
+    })
+    const promise = hotsock.activeConnection.initializationComplete()
+    promise.catch(() => {}) // prevent unhandled rejection during timer advance
+    await jest.advanceTimersByTimeAsync(1000)
+    await expect(promise).rejects.toThrow(
+      "Failed to load a valid token after maximum attempts",
+    )
+    jest.useRealTimers()
   })
 
   test("should call connectTokenErrorFn if connectTokenFn returns an expired token", async () => {
+    jest.useFakeTimers()
     const mockErrorFn = jest.fn()
 
     const hotsock = new HotsockClient(wssBaseUrl, {
@@ -110,12 +126,15 @@ describe("HotsockClient constructor", () => {
       connectTokenErrorFn: mockErrorFn,
     })
 
-    await hotsock.activeConnection.initializationComplete()
+    const promise = hotsock.activeConnection.initializationComplete()
+    await jest.advanceTimersByTimeAsync(1000)
+    await promise
 
     expect(mockErrorFn).toHaveBeenCalled()
     expect(mockErrorFn.mock.calls[0][0].message).toBe(
       "Failed to load a valid token after maximum attempts",
     )
+    jest.useRealTimers()
   })
 
   test("should throw an error if connectTokenErrorFn is not a function", () => {
@@ -189,6 +208,7 @@ describe("HotsockClient constructor", () => {
   })
 
   test("should handle connectTokenFn that throws", async () => {
+    jest.useFakeTimers()
     const errorFn = jest.fn()
     const hotsock = new HotsockClient(wssBaseUrl, {
       connectTokenFn: () => {
@@ -197,12 +217,15 @@ describe("HotsockClient constructor", () => {
       connectTokenErrorFn: errorFn,
     })
 
-    await hotsock.activeConnection.initializationComplete()
+    const promise = hotsock.activeConnection.initializationComplete()
+    await jest.advanceTimersByTimeAsync(1000)
+    await promise
 
     expect(errorFn).toHaveBeenCalled()
     expect(errorFn.mock.calls[0][0].message).toBe(
       "Failed to load a valid token after maximum attempts",
     )
+    jest.useRealTimers()
   })
 
   test("should create an instance with valid webSocketUrl and connectTokenFn", () => {
@@ -747,58 +770,58 @@ describe("public API", () => {
         })
       })
       describe("hotsock.error", () => {
-          test("NOT_SUBSCRIBED sets channel state to unsubscribeConfirmed", () => {
-            mockWebSocket.receiveMessage(
-              JSON.stringify({
-                event: "hotsock.error",
-                channel: "err-channel",
-                error: { code: "NOT_SUBSCRIBED" },
-              }),
-            )
-            expect(
-              hotsock.activeConnection.channels["err-channel"].state,
-            ).toBe("unsubscribeConfirmed")
-          })
-
-          test("ALREADY_SUBSCRIBED sets channel state to subscribeConfirmed", () => {
-            mockWebSocket.receiveMessage(
-              JSON.stringify({
-                event: "hotsock.error",
-                channel: "err-channel-2",
-                error: { code: "ALREADY_SUBSCRIBED" },
-              }),
-            )
-            expect(
-              hotsock.activeConnection.channels["err-channel-2"].state,
-            ).toBe("subscribeConfirmed")
-          })
-
-          test("INVALID_SUBSCRIBE_TOKEN sets channel state to subscribeFailed", () => {
-            mockWebSocket.receiveMessage(
-              JSON.stringify({
-                event: "hotsock.error",
-                channel: "err-channel-3",
-                error: { code: "INVALID_SUBSCRIBE_TOKEN" },
-              }),
-            )
-            expect(
-              hotsock.activeConnection.channels["err-channel-3"].state,
-            ).toBe("subscribeFailed")
-          })
-
-          test("unknown error code does not set channel state", () => {
-            mockWebSocket.receiveMessage(
-              JSON.stringify({
-                event: "hotsock.error",
-                channel: "err-channel-unknown",
-                error: { code: "SOMETHING_UNKNOWN" },
-              }),
-            )
-            expect(
-              hotsock.activeConnection.channels["err-channel-unknown"],
-            ).toBeUndefined()
-          })
+        test("NOT_SUBSCRIBED sets channel state to unsubscribeConfirmed", () => {
+          mockWebSocket.receiveMessage(
+            JSON.stringify({
+              event: "hotsock.error",
+              channel: "err-channel",
+              error: { code: "NOT_SUBSCRIBED" },
+            }),
+          )
+          expect(hotsock.activeConnection.channels["err-channel"].state).toBe(
+            "unsubscribeConfirmed",
+          )
         })
+
+        test("ALREADY_SUBSCRIBED sets channel state to subscribeConfirmed", () => {
+          mockWebSocket.receiveMessage(
+            JSON.stringify({
+              event: "hotsock.error",
+              channel: "err-channel-2",
+              error: { code: "ALREADY_SUBSCRIBED" },
+            }),
+          )
+          expect(hotsock.activeConnection.channels["err-channel-2"].state).toBe(
+            "subscribeConfirmed",
+          )
+        })
+
+        test("INVALID_SUBSCRIBE_TOKEN sets channel state to subscribeFailed", () => {
+          mockWebSocket.receiveMessage(
+            JSON.stringify({
+              event: "hotsock.error",
+              channel: "err-channel-3",
+              error: { code: "INVALID_SUBSCRIBE_TOKEN" },
+            }),
+          )
+          expect(hotsock.activeConnection.channels["err-channel-3"].state).toBe(
+            "subscribeFailed",
+          )
+        })
+
+        test("unknown error code does not set channel state", () => {
+          mockWebSocket.receiveMessage(
+            JSON.stringify({
+              event: "hotsock.error",
+              channel: "err-channel-unknown",
+              error: { code: "SOMETHING_UNKNOWN" },
+            }),
+          )
+          expect(
+            hotsock.activeConnection.channels["err-channel-unknown"],
+          ).toBeUndefined()
+        })
+      })
     })
   })
 
@@ -964,9 +987,9 @@ describe("public API", () => {
         expect(hotsock.clientEventBindings.has("event-a")).toBe(false)
         // event-b should remain
         expect(hotsock.clientEventBindings.has("event-b")).toBe(true)
-        expect(
-          hotsock.clientEventBindings.get("event-b")[0].messageFn,
-        ).toBe(cb2)
+        expect(hotsock.clientEventBindings.get("event-b")[0].messageFn).toBe(
+          cb2,
+        )
       })
     })
   })
@@ -1565,9 +1588,9 @@ describe("public API", () => {
         }),
       )
 
-      expect(
-        hotsock.activeConnection.channels["normal-channel"].state,
-      ).toBe("subscribeConfirmed")
+      expect(hotsock.activeConnection.channels["normal-channel"].state).toBe(
+        "subscribeConfirmed",
+      )
       expect(
         hotsock.activeConnection.channelAliasToReal["normal-channel"],
       ).toBeUndefined()
@@ -2293,10 +2316,11 @@ describe("subscribe with subscribeTokenFn", () => {
   })
 
   test("failed subscribeTokenFn sets channel state to subscribeFailed", async () => {
+    jest.useFakeTimers()
     const hotsock = new HotsockClient(wssBaseUrl, {
       connectTokenFn: () => testValidToken,
     })
-    await hotsock.activeConnection.initializationComplete()
+    await jest.advanceTimersByTimeAsync(0)
     const mockWs = hotsock.activeConnection.ws
 
     mockWs.receiveMessage(
@@ -2315,14 +2339,15 @@ describe("subscribe with subscribeTokenFn", () => {
       subscribeTokenFn,
     })
 
-    // loadTokenWithRetry with 2 attempts, 500ms backoff between
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    // Advance past the retry backoff delays
+    await jest.advanceTimersByTimeAsync(2000)
 
-    expect(
-      hotsock.activeConnection.channels["fail-token-channel"].state,
-    ).toBe("subscribeFailed")
+    expect(hotsock.activeConnection.channels["fail-token-channel"].state).toBe(
+      "subscribeFailed",
+    )
 
     hotsock.terminate()
+    jest.useRealTimers()
   })
 })
 
@@ -2681,9 +2706,9 @@ describe("subscribe sendMessage failure", () => {
       hotsock.activeConnection.subscribe("fail-send-channel"),
     ).rejects.toThrow("WebSocket is closed")
 
-    expect(
-      hotsock.activeConnection.channels["fail-send-channel"].state,
-    ).toBe("subscribeFailed")
+    expect(hotsock.activeConnection.channels["fail-send-channel"].state).toBe(
+      "subscribeFailed",
+    )
 
     hotsock.terminate()
   })
@@ -2762,6 +2787,7 @@ describe("module-level Buffer loading", () => {
   })
 
   test("decodeBase64 throws when neither atob nor BufferInstance is available", async () => {
+    jest.useFakeTimers()
     const savedBuffer = global.Buffer
     const savedAtob = globalThis.atob
     delete global.Buffer
@@ -2786,7 +2812,9 @@ describe("module-level Buffer loading", () => {
       connectTokenFn: () => testValidToken,
       connectTokenErrorFn: errorFn,
     })
-    await hotsock.activeConnection.initializationComplete()
+    const promise = hotsock.activeConnection.initializationComplete()
+    await jest.advanceTimersByTimeAsync(1000)
+    await promise
 
     expect(errorFn).toHaveBeenCalled()
 
@@ -2796,5 +2824,6 @@ describe("module-level Buffer loading", () => {
     globalThis.atob = savedAtob
     jest.unmock("buffer")
     jest.resetModules()
+    jest.useRealTimers()
   })
 })
