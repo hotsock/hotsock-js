@@ -1,6 +1,6 @@
 {
   "name": "@hotsock/hotsock-js",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "JavaScript library for Hotsock WebSocket connections, subscriptions, and messages",
   "main": "dist/hotsock.umd.js",
   "module": "dist/hotsock.esm.js",
@@ -24,7 +24,7 @@
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.0",
     "@rollup/plugin-terser": "^1.0.0",
-    "jest": "^30.2.0",
+    "jest": "^30.3.0",
     "rollup": "^4.59.0"
   },
   "prettier": {
