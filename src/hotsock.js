@@ -124,6 +124,15 @@ export class HotsockClient {
   #reconnecting = false
 
   /**
+   * Whether terminate() has been called. When true, the next bind() with a
+   * channel will create a new Connection to re-establish connectivity.
+   *
+   * @type {boolean}
+   * @private
+   */
+  #terminated = false
+
+  /**
    * The client logger (read-only).
    *
    * @readonly
@@ -301,6 +310,14 @@ export class HotsockClient {
 
       this.#channelEventBindings[channel] ||= []
       this.#channelEventBindings[channel].push(binding)
+
+      // After terminate(), create a fresh connection so the new binding can
+      // subscribe. This fulfills the terminate() contract that re-binding
+      // will re-establish connectivity.
+      if (this.#terminated) {
+        this.#terminated = false
+        this.#activeConnection = new Connection(this)
+      }
 
       // Reset subscribeFailed state so manageSubscriptions() will re-attempt.
       // This allows callers to retry a failed subscription by calling bind()
@@ -491,6 +508,7 @@ export class HotsockClient {
    */
   terminate = () => {
     this.#reconnecting = false
+    this.#terminated = true
     this.#activeConnection.clearClientBindingsOnClose = true
     this.#activeConnection.close()
   }

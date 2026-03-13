@@ -2200,6 +2200,36 @@ describe("terminate()", () => {
     expect(hotsock.channelEventBindings).toStrictEqual({})
   })
 
+  test("bind() after terminate() establishes a new connection", async () => {
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+    await hotsock.activeConnection.initializationComplete()
+    const originalWs = hotsock.activeConnection.ws
+    const originalConnection = hotsock.activeConnection
+
+    // terminate() closes the connection and clears bindings
+    hotsock.terminate()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(originalWs.readyState).toBe(3) // CLOSED
+    expect(hotsock.clientEventBindings.size).toBe(0)
+    expect(hotsock.channelEventBindings).toStrictEqual({})
+
+    // bind() with a channel after terminate creates a new connection
+    hotsock.bind("my-event", jest.fn(), { channel: "my-channel" })
+    await hotsock.activeConnection.initializationComplete()
+
+    // A new connection was created with a new WebSocket
+    expect(hotsock.activeConnection).not.toBe(originalConnection)
+    expect(hotsock.activeConnection.ws).not.toBe(originalWs)
+    expect(hotsock.activeConnection.ws.readyState).toBe(1) // OPEN
+
+    // The binding is present and will be subscribed on the new connection
+    expect(hotsock.channelEventBindings["my-channel"]).toHaveLength(1)
+
+    hotsock.terminate()
+  })
+
   test("terminate() on lazy connection before any channel activity", () => {
     const hotsock = new HotsockClient(wssBaseUrl, {
       connectTokenFn: () => testValidToken,
