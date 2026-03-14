@@ -18,7 +18,7 @@ export class HotsockClient {
   /**
    * The wss:// URL for WebSocket connections (read-only).
    *
-   * @private
+   * @readonly
    * @returns {string} The WebSocket URL.
    */
   get webSocketUrl() {
