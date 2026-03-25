@@ -1,11 +1,3 @@
-// Load Buffer for Base64 decoding
-let BufferInstance = null
-if (typeof global !== "undefined" && global.Buffer) {
-  BufferInstance = global.Buffer
-} else if (typeof window === "undefined") {
-  BufferInstance = require("buffer").Buffer
-}
-
 /**
  * HotsockClient is the main class that should be used by clients to initialize
  * connections and event handlers to a Hotsock installation.
@@ -1293,15 +1285,7 @@ class Connection {
 
   /** @private */
   decodeBase64 = (base64String) => {
-    if (typeof atob === "function") {
-      // web env
-      return atob(base64String)
-    } else if (BufferInstance) {
-      // node env
-      return BufferInstance.from(base64String, "base64").toString("utf-8")
-    } else {
-      throw new Error("Base64 decoding not supported in this environment")
-    }
+    return atob(base64String)
   }
 
   /** @private */
