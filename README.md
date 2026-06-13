@@ -53,7 +53,7 @@ const client = new HotsockClient(
 
 You can control the WebSocket connection by suspending, resuming, or terminating it.
 
-If your connect token includes a [`heartbeatTimeout`](https://www.hotsock.io/docs/connections/claims/#heartbeatTimeout) claim, set `heartbeatIntervalSeconds` at or below that timeout to automatically send `hotsock.heartbeat` messages. The client sends each heartbeat with up to 10% early jitter and never later than the configured interval.
+If your connect token includes a [`heartbeatTimeout`](https://www.hotsock.io/docs/connections/claims/#heartbeatTimeout) claim, set `heartbeatIntervalSeconds` below that timeout to automatically send `hotsock.heartbeat` messages. The client sends each heartbeat with up to 10% early jitter and never later than the configured interval.
 
 ```javascript
 client.suspend() // Suspend the connection while retaining event bindings
