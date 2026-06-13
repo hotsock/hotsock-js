@@ -164,6 +164,38 @@ describe("HotsockClient constructor", () => {
     hotsock.terminate()
   })
 
+  test("should expose heartbeatIntervalSeconds with default value", () => {
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+    })
+    expect(hotsock.heartbeatIntervalSeconds).toBeUndefined()
+    hotsock.terminate()
+  })
+
+  test("should expose heartbeatIntervalSeconds with custom value", () => {
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 30,
+    })
+    expect(hotsock.heartbeatIntervalSeconds).toBe(30)
+    hotsock.terminate()
+  })
+
+  test.each(["30", null, Number.NaN, Infinity, 4.999, 601])(
+    "should throw an error if heartbeatIntervalSeconds is invalid: %p",
+    (heartbeatIntervalSeconds) => {
+      expect(
+        () =>
+          new HotsockClient(wssBaseUrl, {
+            connectTokenFn: () => testValidToken,
+            heartbeatIntervalSeconds,
+          }),
+      ).toThrow(
+        "heartbeatIntervalSeconds must be a finite number between 5 and 600",
+      )
+    },
+  )
+
   test("should expose connectTokenErrorFn getter", () => {
     const errorFn = jest.fn()
     const hotsock = new HotsockClient(wssBaseUrl, {
@@ -1825,6 +1857,263 @@ describe("connected message timeout", () => {
   })
 })
 
+describe("automatic heartbeats", () => {
+  let consoleWarnSpy
+  let consoleDebugSpy
+  let mathRandomSpy
+
+  const receiveConnected = (ws) => {
+    ws.receiveMessage(
+      JSON.stringify({
+        event: "hotsock.connected",
+        data: {
+          connectionId: "test-conn-id",
+          connectionSecret: "test-secret",
+          connectionExpiresAt: "2099-01-01T00:00:00Z",
+        },
+        meta: { uid: "test-uid", umd: null },
+      }),
+    )
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    consoleDebugSpy = jest.spyOn(console, "debug").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    consoleWarnSpy.mockRestore()
+    consoleDebugSpy.mockRestore()
+    mathRandomSpy?.mockRestore()
+    mathRandomSpy = undefined
+  })
+
+  test("does not send heartbeats when heartbeatIntervalSeconds is unset", async () => {
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const ws = hotsock.activeConnection.ws
+    receiveConnected(ws)
+
+    await jest.advanceTimersByTimeAsync(600000)
+
+    expect(ws.send).not.toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    hotsock.terminate()
+  })
+
+  test("sends a heartbeat no later than the configured interval", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(1)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 10,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const ws = hotsock.activeConnection.ws
+    receiveConnected(ws)
+    ws.send.mockClear()
+
+    await jest.advanceTimersByTimeAsync(9998)
+    expect(ws.send).not.toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    await jest.advanceTimersByTimeAsync(2)
+    expect(ws.send).toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    hotsock.terminate()
+  })
+
+  test("jitters heartbeat sends up to 10 percent early", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(0)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 10,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const ws = hotsock.activeConnection.ws
+    receiveConnected(ws)
+    ws.send.mockClear()
+
+    await jest.advanceTimersByTimeAsync(8998)
+    expect(ws.send).not.toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    await jest.advanceTimersByTimeAsync(2)
+    expect(ws.send).toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    hotsock.terminate()
+  })
+
+  test("recomputes heartbeat jitter after each send", async () => {
+    mathRandomSpy = jest
+      .spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(1)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 10,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const ws = hotsock.activeConnection.ws
+    receiveConnected(ws)
+    ws.send.mockClear()
+
+    await jest.advanceTimersByTimeAsync(8999)
+    expect(ws.send).toHaveBeenCalledTimes(1)
+    expect(ws.send).toHaveBeenLastCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    await jest.advanceTimersByTimeAsync(9999)
+    expect(ws.send).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(1)
+    expect(ws.send).toHaveBeenCalledTimes(2)
+    expect(ws.send).toHaveBeenLastCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    hotsock.terminate()
+  })
+
+  test("@@messageSent bindings receive automatic heartbeat messages", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(1)
+    const messageSentFn = jest.fn()
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 5,
+    })
+    hotsock.bind("@@messageSent", messageSentFn)
+
+    await jest.advanceTimersByTimeAsync(1)
+    receiveConnected(hotsock.activeConnection.ws)
+
+    await jest.advanceTimersByTimeAsync(5000)
+
+    expect(messageSentFn).toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    hotsock.terminate()
+  })
+
+  test("stops heartbeats after suspend", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(1)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 5,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const ws = hotsock.activeConnection.ws
+    receiveConnected(ws)
+    ws.send.mockClear()
+
+    hotsock.suspend()
+    await jest.advanceTimersByTimeAsync(5000)
+
+    expect(ws.send).not.toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+  })
+
+  test("stops heartbeats after terminate", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(1)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 5,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const ws = hotsock.activeConnection.ws
+    receiveConnected(ws)
+    ws.send.mockClear()
+
+    hotsock.terminate()
+    await jest.advanceTimersByTimeAsync(5000)
+
+    expect(ws.send).not.toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+  })
+
+  test("restarts heartbeats after resume", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(1)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 5,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const originalWs = hotsock.activeConnection.ws
+    receiveConnected(originalWs)
+
+    hotsock.suspend()
+    await jest.advanceTimersByTimeAsync(1)
+
+    hotsock.resume()
+    await jest.advanceTimersByTimeAsync(1)
+    const resumedWs = hotsock.activeConnection.ws
+    receiveConnected(resumedWs)
+    resumedWs.send.mockClear()
+
+    await jest.advanceTimersByTimeAsync(5000)
+
+    expect(resumedWs).not.toBe(originalWs)
+    expect(resumedWs.send).toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    hotsock.terminate()
+  })
+
+  test("restarts heartbeats after reconnect", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(1)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 5,
+    })
+
+    await jest.advanceTimersByTimeAsync(1)
+    const originalWs = hotsock.activeConnection.ws
+    receiveConnected(originalWs)
+
+    originalWs.close()
+    await jest.advanceTimersByTimeAsync(1)
+
+    const reconnectedWs = hotsock.activeConnection.ws
+    expect(reconnectedWs).not.toBe(originalWs)
+    receiveConnected(reconnectedWs)
+    reconnectedWs.send.mockClear()
+
+    await jest.advanceTimersByTimeAsync(5000)
+
+    expect(reconnectedWs.send).toHaveBeenCalledWith(
+      `{"event":"hotsock.heartbeat"}`,
+    )
+
+    hotsock.terminate()
+  })
+
+  test("lazy connection starts heartbeats only after the WebSocket opens", async () => {
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(1)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn: () => testValidToken,
+      heartbeatIntervalSeconds: 5,
+      lazyConnection: true,
+    })
+
+    await jest.advanceTimersByTimeAsync(5000)
+    expect(hotsock.activeConnection.ws).toBeUndefined()
+
+    hotsock.bind("my-event", jest.fn(), { channel: "lazy-channel" })
+    await jest.advanceTimersByTimeAsync(1)
+
+    const ws = hotsock.activeConnection.ws
+    receiveConnected(ws)
+    ws.send.mockClear()
+
+    await jest.advanceTimersByTimeAsync(5000)
+
+    expect(ws.send).toHaveBeenCalledWith(`{"event":"hotsock.heartbeat"}`)
+
+    hotsock.terminate()
+  })
+})
+
 describe("reconnectWithBackoff", () => {
   let consoleWarnSpy
   let consoleDebugSpy
@@ -2743,4 +3032,3 @@ describe("subscribe sendMessage failure", () => {
     hotsock.terminate()
   })
 })
-
