@@ -64,6 +64,19 @@ export class HotsockClient {
   #connectTokenErrorFn
 
   /**
+   * The number of seconds between automatic hotsock.heartbeat messages.
+   *
+   * @readonly
+   * @returns {number=}
+   */
+  get heartbeatIntervalSeconds() {
+    return this.#heartbeatIntervalSeconds
+  }
+
+  /** @private @type {number=} */
+  #heartbeatIntervalSeconds
+
+  /**
    * The client event bindings for this instance as bound with `bind`/`unbind`
    * (read-only). This map stores event bindings, with the event names (strings
    * or RegExp objects) as keys and arrays of Binding objects as values.
@@ -165,6 +178,10 @@ export class HotsockClient {
    * @param {Logger} [options.logger] The custom logger to use.
    * @param {string} [options.logLevel] The log level to use on the default
    * logger.
+   * @param {number} [options.heartbeatIntervalSeconds] The number of seconds
+   * between automatic `hotsock.heartbeat` messages. Must be between 5 and 600
+   * seconds inclusive. The actual send time is jittered up to 10% early and
+   * never later than the specified interval.
    * @throws {InvalidArgumentError | TypeError} If required parameters are
    * invalid.
    */
@@ -177,6 +194,7 @@ export class HotsockClient {
       lazyConnection = false,
       logger,
       logLevel = "warn",
+      heartbeatIntervalSeconds,
     } = {},
   ) {
     if (!webSocketUrl || webSocketUrl === "") {
@@ -197,6 +215,20 @@ export class HotsockClient {
     }
 
     this.#connectTokenErrorFn = connectTokenErrorFn
+
+    if (
+      heartbeatIntervalSeconds !== undefined &&
+      (typeof heartbeatIntervalSeconds !== "number" ||
+        !Number.isFinite(heartbeatIntervalSeconds) ||
+        heartbeatIntervalSeconds < 5 ||
+        heartbeatIntervalSeconds > 600)
+    ) {
+      throw new InvalidArgumentError(
+        "heartbeatIntervalSeconds must be a finite number between 5 and 600",
+      )
+    }
+
+    this.#heartbeatIntervalSeconds = heartbeatIntervalSeconds
 
     this.#logger = this.#createLogger(logLevel)
     if (logger) {
@@ -744,6 +776,14 @@ class Connection {
   #connectedTimeoutId
 
   /**
+   * Timeout ID for the next automatic heartbeat send.
+   *
+   * @type {number}
+   * @private
+   */
+  #heartbeatTimeoutId
+
+  /**
    * @type {Promise}
    * @private
    */
@@ -901,6 +941,7 @@ class Connection {
   close() {
     this.#closed = true
     clearTimeout(this.#connectedTimeoutId)
+    this.stopHeartbeatLoop()
 
     this.#autoReconnect = false
     this.#ws?.close()
@@ -930,6 +971,9 @@ class Connection {
     this.#resolveOpenPromise()
 
     this.startSubscriptionManagementLoop()
+    if (!this.#closed) {
+      this.startHeartbeatLoop()
+    }
 
     const clientBindings =
       this.#client.clientEventBindings.get("@@connect") || []
@@ -957,6 +1001,7 @@ class Connection {
    */
   onclose = (wsEvent) => {
     clearTimeout(this.#connectedTimeoutId)
+    this.stopHeartbeatLoop()
 
     this.#client.logger.debug(
       `[hotsock] connection "${this.#connectionIdLogDescription}" disconnected`,
@@ -1128,6 +1173,46 @@ class Connection {
   stopSubscribeLoop = () => {
     clearInterval(this.#subscribeLoopInterval)
     this.#subscribeLoopInterval = null
+  }
+
+  /**
+   * Start the automatic heartbeat loop, if configured.
+   *
+   * @private
+   */
+  startHeartbeatLoop = () => {
+    if (this.#client.heartbeatIntervalSeconds === undefined) return
+
+    this.stopHeartbeatLoop()
+    this.#heartbeatTimeoutId = setTimeout(() => {
+      if (this.#ws?.readyState !== 1 /* 1 = OPEN */) return
+
+      this.sendMessage(`{"event":"hotsock.heartbeat"}`)
+      this.startHeartbeatLoop()
+    }, this.heartbeatDelayMs())
+  }
+
+  /**
+   * Stop the automatic heartbeat loop.
+   *
+   * @private
+   */
+  stopHeartbeatLoop = () => {
+    clearTimeout(this.#heartbeatTimeoutId)
+    this.#heartbeatTimeoutId = null
+  }
+
+  /**
+   * Return a heartbeat delay jittered up to 10% early.
+   *
+   * @private
+   * @returns {number}
+   */
+  heartbeatDelayMs = () => {
+    const intervalMs = this.#client.heartbeatIntervalSeconds * 1000
+    const minDelayMs = intervalMs * 0.9
+    const delayMs = minDelayMs + Math.random() * (intervalMs - minDelayMs)
+    return Math.min(delayMs, intervalMs)
   }
 
   /**

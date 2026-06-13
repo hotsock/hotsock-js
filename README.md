@@ -42,6 +42,7 @@ const client = new HotsockClient(
       return "your-jwt-token"
     },
     connectTokenFnMaxAttempts: 3, // Optional, defaults to 2
+    heartbeatIntervalSeconds: 30, // Optional, sends hotsock.heartbeat with jitter
     lazyConnection: true, // Optional, prevents connection until needed, defaults to false
     logLevel: "debug", // Optional, default log level is "warn"
   }
@@ -51,6 +52,8 @@ const client = new HotsockClient(
 ### Connection management
 
 You can control the WebSocket connection by suspending, resuming, or terminating it.
+
+If your connect token includes a [`heartbeatTimeout`](https://www.hotsock.io/docs/connections/claims/#heartbeatTimeout) claim, set `heartbeatIntervalSeconds` at or below that timeout to automatically send `hotsock.heartbeat` messages. The client sends each heartbeat with up to 10% early jitter and never later than the configured interval.
 
 ```javascript
 client.suspend() // Suspend the connection while retaining event bindings
