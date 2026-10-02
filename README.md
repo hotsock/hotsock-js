@@ -45,9 +45,16 @@ const client = new HotsockClient(
     heartbeatIntervalSeconds: 30, // Optional, sends hotsock.heartbeat with jitter
     lazyConnection: true, // Optional, prevents connection until needed, defaults to false
     logLevel: "debug", // Optional, default log level is "warn"
+    tokenFnTimeoutSeconds: 10, // Optional, fails a token call that takes longer, defaults to 10
   }
 )
 ```
+
+### Reconnecting
+
+When a connection closes unexpectedly, or its token can't be loaded (including for the very first connection), the client reconnects with backoff (1 second, growing to 20 seconds) until it succeeds or you call `suspend()` or `terminate()`. Every attempt calls `connectTokenFn` for a fresh token, and every channel is re-subscribed (calling its `subscribeTokenFn` again) once the connection opens. `connectTokenErrorFn` is called each time an attempt runs out of token retries.
+
+In browsers, a pending reconnect runs immediately when the browser comes back online or the page becomes visible again, instead of waiting out the backoff. Token calls that don't return within `tokenFnTimeoutSeconds` count as failed, so a request that hangs after a computer wakes from sleep can't stall reconnecting.
 
 ### Connection management
 

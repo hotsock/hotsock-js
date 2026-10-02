@@ -49,9 +49,10 @@ export class HotsockClient {
   #connectTokenFnMaxAttempts
 
   /**
-   * A function that is called after retries on the `connectTokenFn` have been
-   * reached and no further attempts to load it will be made. If not supplied,
-   * the error is thrown.
+   * A function that is called each time retries on the `connectTokenFn` have
+   * been exhausted. The client keeps trying to connect with backoff until
+   * `terminate()` or `suspend()` is called. If not supplied, the error is
+   * thrown.
    *
    * @readonly
    * @returns {LoadTokenErrorFn}
@@ -75,6 +76,20 @@ export class HotsockClient {
 
   /** @private @type {number=} */
   #heartbeatIntervalSeconds
+
+  /**
+   * The number of seconds to wait for a `connectTokenFn` or
+   * `subscribeTokenFn` call before treating the attempt as failed.
+   *
+   * @readonly
+   * @returns {number}
+   */
+  get tokenFnTimeoutSeconds() {
+    return this.#tokenFnTimeoutSeconds
+  }
+
+  /** @private @type {number} */
+  #tokenFnTimeoutSeconds
 
   /**
    * The client event bindings for this instance as bound with `bind`/`unbind`
@@ -127,6 +142,24 @@ export class HotsockClient {
    * @private
    */
   #reconnecting = false
+
+  /**
+   * The pending backoff timer of the reconnection loop, if it's waiting to
+   * make its next attempt.
+   *
+   * @type {number=}
+   * @private
+   */
+  #reconnectTimeoutId = null
+
+  /**
+   * Skips the reconnection loop's remaining backoff and attempts now. Set while
+   * a reconnection loop is active.
+   *
+   * @type {function=}
+   * @private
+   */
+  #reconnectNow = null
 
   /**
    * Whether terminate() has been called. When true, the next bind() with a
@@ -182,6 +215,11 @@ export class HotsockClient {
    * between automatic `hotsock.heartbeat` messages. Must be between 5 and 600
    * seconds inclusive. The actual send time is jittered up to 10% early and
    * never later than the specified interval.
+   * @param {number} [options.tokenFnTimeoutSeconds] The number of seconds to
+   * wait for each `connectTokenFn` or `subscribeTokenFn` call before treating
+   * the attempt as failed, so a request that never completes (common right
+   * after a computer wakes from sleep) can't stall reconnecting. Defaults to
+   * 10.
    * @throws {InvalidArgumentError | TypeError} If required parameters are
    * invalid.
    */
@@ -195,6 +233,7 @@ export class HotsockClient {
       logger,
       logLevel = "warn",
       heartbeatIntervalSeconds,
+      tokenFnTimeoutSeconds = 10,
     } = {},
   ) {
     if (!webSocketUrl || webSocketUrl === "") {
@@ -230,12 +269,62 @@ export class HotsockClient {
 
     this.#heartbeatIntervalSeconds = heartbeatIntervalSeconds
 
+    if (
+      typeof tokenFnTimeoutSeconds !== "number" ||
+      !Number.isFinite(tokenFnTimeoutSeconds) ||
+      tokenFnTimeoutSeconds <= 0
+    ) {
+      throw new InvalidArgumentError(
+        "tokenFnTimeoutSeconds must be a positive finite number",
+      )
+    }
+
+    this.#tokenFnTimeoutSeconds = tokenFnTimeoutSeconds
+
     this.#logger = this.#createLogger(logLevel)
     if (logger) {
       this.#logger = logger
     }
 
+    this.#addBrowserListeners()
     this.#activeConnection = new Connection(this, lazyConnection)
+  }
+
+  /**
+   * When the browser comes back online or the page becomes visible again,
+   * retry a pending reconnect right away instead of waiting out its backoff.
+   *
+   * @private
+   */
+  #handleBrowserResume = () => {
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    ) {
+      return
+    }
+    this.#reconnectNow?.()
+  }
+
+  /** @private */
+  #addBrowserListeners() {
+    if (typeof window === "undefined" || !window.addEventListener) return
+    window.addEventListener("online", this.#handleBrowserResume)
+    if (typeof document !== "undefined" && document.addEventListener) {
+      document.addEventListener("visibilitychange", this.#handleBrowserResume)
+    }
+  }
+
+  /** @private */
+  #removeBrowserListeners() {
+    if (typeof window === "undefined" || !window.removeEventListener) return
+    window.removeEventListener("online", this.#handleBrowserResume)
+    if (typeof document !== "undefined" && document.removeEventListener) {
+      document.removeEventListener(
+        "visibilitychange",
+        this.#handleBrowserResume,
+      )
+    }
   }
 
   /**
@@ -340,6 +429,7 @@ export class HotsockClient {
       // will re-establish connectivity.
       if (this.#terminated) {
         this.#terminated = false
+        this.#addBrowserListeners()
         this.#activeConnection = new Connection(this)
       }
 
@@ -471,7 +561,7 @@ export class HotsockClient {
    * @public
    */
   suspend = () => {
-    this.#reconnecting = false
+    this.#stopReconnecting()
     this.#activeConnection?.close()
   }
 
@@ -486,33 +576,39 @@ export class HotsockClient {
   }
 
   /**
-   * Reconnect with backoff + jitter
+   * Reconnect with backoff + jitter. Each attempt creates a new connection,
+   * which loads a fresh token with `connectTokenFn`. A pending attempt runs
+   * immediately when the browser comes back online or the page becomes
+   * visible.
    */
   reconnectWithBackoff = () => {
     if (this.#reconnecting) return
     this.#reconnecting = true
 
+    const initialBackoffDelay = 1000 // 1 second
     const maxBackoffDelay = 20000 // 20 seconds
-    let backoffDelay = 1000 // 1 second (initial)
+    let backoffDelay = initialBackoffDelay
 
     const connect = async () => {
+      this.#reconnectTimeoutId = null
       if (!this.#reconnecting) return
 
       try {
-        this.#activeConnection = new Connection(this)
-        await this.#activeConnection.initializationComplete()
-        await this.#activeConnection.connectionOpen()
+        const connection = new Connection(this)
+        this.#activeConnection = connection
+        await connection.initializationComplete()
+        await connection.connectionOpen()
 
         // Connection opened successfully
-        this.#reconnecting = false
+        this.#stopReconnecting()
 
         // Resubscribe to all channels
-        this.#activeConnection.manageSubscriptions()
+        connection.manageSubscriptions()
       } catch (error) {
         if (!this.#reconnecting) return
 
         this.logger.warn("[hotsock] reconnect attempt failed:", error)
-        setTimeout(() => {
+        this.#reconnectTimeoutId = setTimeout(() => {
           const jitter = Math.random() * 1000 // Add jitter up to 1 second
           backoffDelay = Math.min(backoffDelay * 1.5 + jitter, maxBackoffDelay)
           connect()
@@ -520,7 +616,28 @@ export class HotsockClient {
       }
     }
 
+    this.#reconnectNow = () => {
+      // Only while waiting out a backoff; an attempt may already be underway.
+      if (!this.#reconnecting || this.#reconnectTimeoutId === null) return
+      this.logger.debug("[hotsock] reconnecting now")
+      clearTimeout(this.#reconnectTimeoutId)
+      backoffDelay = initialBackoffDelay
+      connect()
+    }
+
     connect()
+  }
+
+  /**
+   * End the reconnection loop, if one is active.
+   *
+   * @private
+   */
+  #stopReconnecting() {
+    this.#reconnecting = false
+    clearTimeout(this.#reconnectTimeoutId)
+    this.#reconnectTimeoutId = null
+    this.#reconnectNow = null
   }
 
   /**
@@ -531,7 +648,8 @@ export class HotsockClient {
    * @public
    */
   terminate = () => {
-    this.#reconnecting = false
+    this.#stopReconnecting()
+    this.#removeBrowserListeners()
     this.#terminated = true
     this.#activeConnection.clearClientBindingsOnClose = true
     this.#activeConnection.close()
@@ -847,13 +965,15 @@ class Connection {
         this.#client.connectTokenFnMaxAttempts,
       )
     } catch (error) {
+      this.#rejectOpenPromise(error)
+      // Keep trying, including when the very first connection fails.
+      this.#reconnectIfActive()
+
       if (this.#client.connectTokenErrorFn) {
         this.#client.connectTokenErrorFn(error)
-        this.#rejectOpenPromise(error)
         return
       }
 
-      this.#rejectOpenPromise(error)
       throw error
     }
 
@@ -1022,7 +1142,19 @@ class Connection {
       this.clearClientBindingsOnClose = false
     }
 
-    if (!this.#autoReconnect) return
+    this.#reconnectIfActive()
+  }
+
+  /**
+   * Start reconnecting unless this connection was closed intentionally or has
+   * been replaced. A replaced connection closing late (for example, one that
+   * was still connecting when resume() replaced it) must not replace the
+   * client's current connection.
+   *
+   * @private
+   */
+  #reconnectIfActive() {
+    if (!this.#autoReconnect || this !== this.#client.activeConnection) return
 
     this.#client.reconnectWithBackoff()
   }
@@ -1385,6 +1517,34 @@ class Connection {
   }
 
   /**
+   * Call a token function, rejecting if it doesn't return within the timeout.
+   *
+   * @private
+   * @param {LoadTokenFn} tokenFn
+   * @param {number} timeoutSeconds
+   * @returns {Promise<string>}
+   */
+  #withTimeout = (tokenFn, timeoutSeconds) => {
+    let timeoutId
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `token function did not return within ${timeoutSeconds} seconds`,
+            ),
+          ),
+        timeoutSeconds * 1000,
+      )
+    })
+
+    return Promise.race([
+      Promise.resolve().then(() => tokenFn()),
+      timeout,
+    ]).finally(() => clearTimeout(timeoutId))
+  }
+
+  /**
    * @private
    * @param {LoadTokenFn} tokenFn
    * @param {number} maxAttempts
@@ -1394,7 +1554,10 @@ class Connection {
 
     while (attempts < maxAttempts) {
       try {
-        const token = await tokenFn()
+        const token = await this.#withTimeout(
+          tokenFn,
+          this.#client.tokenFnTimeoutSeconds,
+        )
 
         if (!this.looksLikeJwt(token)) {
           throw new Error(
