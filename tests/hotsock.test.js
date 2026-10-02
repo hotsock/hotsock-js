@@ -2456,6 +2456,233 @@ describe("default logger", () => {
   })
 })
 
+describe("reconnect resilience", () => {
+  const connected = (connection) =>
+    connection.ws.receiveMessage(
+      JSON.stringify({
+        event: "hotsock.connected",
+        data: { connectionId: "conn" },
+        meta: { uid: null, umd: null },
+      }),
+    )
+
+  let consoleWarnSpy
+  let consoleDebugSpy
+  let originalWebSocket
+  let mathRandomSpy
+
+  class ImmediateCloseWebSocket {
+    constructor(url) {
+      this.url = url
+      this.readyState = 3 // CLOSED
+      this.send = jest.fn()
+      this.onerror = () => {}
+      this.onopen = () => {}
+      this.onclose = () => {}
+      this.onmessage = () => {}
+      setTimeout(() => this.onclose(), 0)
+    }
+    close() {
+      setTimeout(() => this.onclose(), 0)
+    }
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    consoleDebugSpy = jest.spyOn(console, "debug").mockImplementation(() => {})
+    originalWebSocket = global.WebSocket
+    mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(0)
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    consoleWarnSpy.mockRestore()
+    consoleDebugSpy.mockRestore()
+    mathRandomSpy.mockRestore()
+    global.WebSocket = originalWebSocket
+    delete global.window
+    delete global.document
+  })
+
+  test("validates tokenFnTimeoutSeconds", () => {
+    expect(
+      () =>
+        new HotsockClient(wssBaseUrl, {
+          connectTokenFn: () => testValidToken,
+          tokenFnTimeoutSeconds: 0,
+        }),
+    ).toThrow("tokenFnTimeoutSeconds must be a positive finite number")
+  })
+
+  test("keeps retrying when the first connection's token can't be loaded", async () => {
+    const connectTokenFn = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(testValidToken)
+    const connectTokenErrorFn = jest.fn()
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn,
+      connectTokenErrorFn,
+    })
+
+    // Two failed attempts (500ms apart) exhaust the first connection
+    await jest.advanceTimersByTimeAsync(500)
+    expect(connectTokenErrorFn).toHaveBeenCalledTimes(1)
+
+    // The reconnect loop's first attempt runs right away and succeeds
+    await jest.advanceTimersByTimeAsync(1)
+    expect(connectTokenFn).toHaveBeenCalledTimes(3)
+    expect(hotsock.activeConnection.ws.url).toBe(
+      `${wssBaseUrl}?token=${testValidToken}`,
+    )
+    expect(hotsock.activeConnection.ws.readyState).toBe(1)
+
+    hotsock.terminate()
+  })
+
+  test("a token function that never returns times out instead of stalling reconnects", async () => {
+    const connectTokenFn = jest
+      .fn()
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockReturnValue(testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, {
+      connectTokenFn,
+      tokenFnTimeoutSeconds: 5,
+    })
+    const initialized = hotsock.activeConnection.initializationComplete()
+    initialized.catch(() => {})
+
+    await jest.advanceTimersByTimeAsync(4999)
+    expect(connectTokenFn).toHaveBeenCalledTimes(1)
+
+    // The hung call times out and the retry gets a token
+    await jest.advanceTimersByTimeAsync(1 + 500)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+    await initialized
+    expect(hotsock.activeConnection.ws.url).toBe(
+      `${wssBaseUrl}?token=${testValidToken}`,
+    )
+
+    hotsock.terminate()
+  })
+
+  test("a replaced connection closing late does not replace the active connection", async () => {
+    const connectTokenFn = jest.fn(() => testValidToken)
+    const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+    await jest.advanceTimersByTimeAsync(1)
+
+    // Still connecting when resume() replaces it
+    const replaced = hotsock.activeConnection
+    replaced.ws.readyState = 0
+    hotsock.resume()
+    await jest.advanceTimersByTimeAsync(1)
+    const active = hotsock.activeConnection
+    expect(active).not.toBe(replaced)
+    connected(active)
+
+    replaced.ws.close()
+    await jest.advanceTimersByTimeAsync(30000)
+
+    expect(hotsock.activeConnection).toBe(active)
+    expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+    hotsock.terminate()
+  })
+
+  describe("in a browser", () => {
+    beforeEach(() => {
+      global.window = new EventTarget()
+      global.document = new EventTarget()
+      global.document.visibilityState = "visible"
+    })
+
+    test("reconnects immediately when the browser comes back online", async () => {
+      global.WebSocket = ImmediateCloseWebSocket
+      const connectTokenFn = jest.fn(() => testValidToken)
+      const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+
+      // Initial connection + immediate first reconnect, then a backoff wait
+      await jest.advanceTimersByTimeAsync(2)
+      expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+      global.WebSocket = originalWebSocket
+      window.dispatchEvent(new Event("online"))
+      await jest.advanceTimersByTimeAsync(1)
+
+      expect(connectTokenFn).toHaveBeenCalledTimes(3)
+      expect(hotsock.activeConnection.ws.readyState).toBe(1)
+      connected(hotsock.activeConnection)
+
+      // The loop ended; later backoff timers don't make more attempts
+      await jest.advanceTimersByTimeAsync(30000)
+      expect(connectTokenFn).toHaveBeenCalledTimes(3)
+
+      hotsock.terminate()
+    })
+
+    test("reconnects immediately when the page becomes visible, but not while hidden", async () => {
+      global.WebSocket = ImmediateCloseWebSocket
+      const connectTokenFn = jest.fn(() => testValidToken)
+      const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+      await jest.advanceTimersByTimeAsync(2)
+      expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+      document.visibilityState = "hidden"
+      document.dispatchEvent(new Event("visibilitychange"))
+      await jest.advanceTimersByTimeAsync(1)
+      expect(connectTokenFn).toHaveBeenCalledTimes(2)
+
+      document.visibilityState = "visible"
+      document.dispatchEvent(new Event("visibilitychange"))
+      await jest.advanceTimersByTimeAsync(1)
+      expect(connectTokenFn).toHaveBeenCalledTimes(3)
+
+      hotsock.terminate()
+    })
+
+    test("going online with a healthy connection does nothing", async () => {
+      const connectTokenFn = jest.fn(() => testValidToken)
+      const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+      await jest.advanceTimersByTimeAsync(1)
+
+      window.dispatchEvent(new Event("online"))
+      await jest.advanceTimersByTimeAsync(1)
+      expect(connectTokenFn).toHaveBeenCalledTimes(1)
+
+      hotsock.terminate()
+    })
+
+    test("terminate() stops listening until a binding reconnects", async () => {
+      global.WebSocket = ImmediateCloseWebSocket
+      const connectTokenFn = jest.fn(() => testValidToken)
+      const hotsock = new HotsockClient(wssBaseUrl, { connectTokenFn })
+      await jest.advanceTimersByTimeAsync(2)
+
+      hotsock.terminate()
+      await jest.advanceTimersByTimeAsync(1)
+      const calls = connectTokenFn.mock.calls.length
+
+      window.dispatchEvent(new Event("online"))
+      await jest.advanceTimersByTimeAsync(30000)
+      expect(connectTokenFn).toHaveBeenCalledTimes(calls)
+
+      // Binding after terminate() reconnects, and listens again
+      hotsock.bind("event", () => {}, { channel: "mychannel" })
+      await jest.advanceTimersByTimeAsync(2)
+      const reboundCalls = connectTokenFn.mock.calls.length
+      expect(reboundCalls).toBeGreaterThan(calls)
+
+      window.dispatchEvent(new Event("online"))
+      await jest.advanceTimersByTimeAsync(1)
+      expect(connectTokenFn).toHaveBeenCalledTimes(reboundCalls + 1)
+
+      hotsock.terminate()
+    })
+  })
+})
+
 describe("terminate()", () => {
   let consoleWarnSpy
   let consoleDebugSpy
